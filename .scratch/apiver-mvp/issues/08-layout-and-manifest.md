@@ -1,7 +1,8 @@
 # 08 — Enforced layout and the version manifest
 
 Type: grilling
-Status: open
+Status: resolved
+Assignee: claude
 Blocked by: 07
 
 ## Question
@@ -37,3 +38,19 @@ The manifest is load-bearing for four features: `migrate` writes it, `apiver ver
 So the enforced layout must mandate version-suffixed class names even though the directory already separates versions. Decide whether that is enforced by a system check, by a CLI lint, or only documented — and note a related trap: `@extend_schema_serializer` annotations live in a plain class attribute, so an **undecorated subclass silently inherits its parent's `component_name`**.
 
 **Also:** `SCHEMA_PATH_PREFIX` must be pinned per version. Its default auto-estimator is `commonpath` over the document's own paths, so adding a single endpoint can rename every operationId in the file — which would make 0.2's `diff` unusable.
+
+## Answer
+
+Recorded as [ADR 0003 — Enforced layout and the manifest](../../../docs/adr/0003-layout-and-manifest.md). No `CONTEXT.md` changes — nothing here is a new *domain* concept distinct from already-glossaried `Registration` and `Manifest`; the file/directory names introduced (`registry.py`, `apiver.toml`) are implementation detail, not vocabulary.
+
+1. **Layout:** flat per-version package — `api/v2/{serializers.py,views.py,registry.py}` — no package-per-resource subpackaging.
+2. **Enforcement is two mechanisms, not one:** class-naming (ticket 03's constraint) enforced at `register()`/`override()` time; directory shape enforced via a Django system check. Different information available at different moments, so one mechanism per concern.
+3. **Non-uniform layout across versions is allowed**, confirming the standing decision. `migrate` gives the Base Version the same `api/v1/` package root as authored versions but writes only `registry.py` into it — existing base code never moves.
+4. **The generated `registry.py` is a one-shot scaffold** — hand-editable after `migrate` writes it once, never regenerated.
+5. **Manifest format: standalone `apiver.toml` at repo root** — not a Python module (would blur code-is-authoritative), not embedded in `pyproject.toml` (collides with other tools' ownership of that file).
+6. **Contents mirror the in-memory resolution table one-to-one**, serialized, plus per-version lineage/frozen/deprecation state and alias pointers. No separate schema.
+7. **Written only by explicit CLI invocation** (`apiver migrate` for the base, `apiver manifest` otherwise) — never at import time.
+8. **The running server never reads the manifest.** Gating and resolution always compute from live `Version` objects. This narrows the ticket's original four manifest consumers to three — `migrate` writes it, `apiver versions` reads it, squash reads it — since gating was reclassified onto live objects, consistent with [ADR 0002](../../../docs/adr/0002-public-api-surface.md) item 5 ("code is authoritative").
+9. **Staleness caught at two layers:** `apiver manifest --check` (CI-oriented, hard gate, same idiom as `manage.py makemigrations --check --dry-run`) and a Django system check at **Warning** level using the same mechanism as item 2, firing on nearly every `manage.py` command so drift is visible locally, not just in CI. Warning rather than Error because item 8 means a stale manifest doesn't break anything live.
+
+**Feeds forward:** [09 — Squash feasibility](09-squash-feasibility.md) now has two concrete facts to verify — it must read the Base Version's source through `api/v1/registry.py`'s pointers, and it can only treat the manifest as current immediately after `manifest --check` passes, never unconditionally. Graduates the "Gating semantics in detail" fog patch into a new ticket, since both its blockers (07's alias decisions, 08's manifest schema and "code is authoritative for gating") are now settled.
