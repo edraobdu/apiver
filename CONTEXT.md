@@ -76,8 +76,9 @@ _Avoid_: merging, flattening (reserved for squash)
 ### Lifecycle
 
 **Manifest**:
-The record of every Version, its lineage, status, aliases and resolution map. Read by version gating, the
-CLI, and squash.
+The record of every Version, its lineage, status, aliases and resolution map — a generated snapshot, not a
+source of truth. Read by the CLI and squash; version gating reads live `Version` objects instead, never the
+manifest (ADR 0003).
 _Avoid_: registry (which is DRF's term for a router's route list), config
 
 **Squash**:

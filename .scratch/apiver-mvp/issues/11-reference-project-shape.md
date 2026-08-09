@@ -1,7 +1,8 @@
 # 11 — Reference project: shape and structure
 
 Type: grilling
-Status: open
+Status: resolved
+Assignee: claude
 Blocked by: —
 
 ## Question
@@ -25,3 +26,17 @@ Decide:
 - Full classification table: [04 — The change-shape catalogue](04-change-shape-catalogue.md).
 - Standing decision (map): route composition works for anything; schema reasoning only for what drf-spectacular understands — the reference project is where that boundary becomes visible.
 - Graduated from the map's "Not yet specified: Reference-project construction."
+
+## Answer
+
+1. **Granularity: realistic small set, not 22 isolated resources.** Extend [05](05-prove-the-mechanism.md)'s `users`/`payments`/`orders` (+ one `APIView`) rather than building 22 single-purpose toy resources. The destination calls this "a real reference DRF project," and the credibility test is "does this hold up on an app that looks like mine" — isolated one-shape-per-resource reads as a unit-test suite, not a reference app.
+
+2. **Coverage: all six awkward/undetectable rows, explicitly.** Rows 5 (rename), 6 (field removal), 9 (flat↔nested restructure), 10 (`SerializerMethodField` output, diff-blind), 13 (URL prefix change), and 14b (`@action` removal) must each be visibly demonstrated with their documented idiom — no representative subset. This is the entire content of the "name the 20%" pitch from [04](04-change-shape-catalogue.md); omitting one quietly undercuts it in both directions (unsupported-looking, or awkwardness hidden rather than shown honestly). The full 22-row catalogue should also be reachable somewhere in the project, since the destination's rule is symmetric ("if a change-shape isn't in that project, the library doesn't support it") — but the clean rows (plain inheritance) need no special design, only presence.
+
+3. **Same project doubles as the drf-spectacular correctness demo.** One project serves both purposes, as [03](03-spectacular-integration.md) already assumed. No second parallel DRF project.
+
+4. **Promote [05](05-prove-the-mechanism.md)'s spike — domain shape only, not internals.** The spike's `users`/`payments`/`orders` resources, serializers, and routes carry forward from branch `prototype/05-mechanism-spike` into the permanent reference project. Its throwaway `apiver_core.py` composition layer does not — that gets replaced with the real public API from [07](07-public-api-surface.md) and the enforced layout from [08](08-layout-and-manifest.md).
+
+5. **Sequencing confirmed.** This ticket produced the plan only. [07](07-public-api-surface.md) and [08](08-layout-and-manifest.md) are both already resolved, so the reference-project build ticket is unblocked immediately — graduated as [13 — Build the reference project](13-build-reference-project.md).
+
+**Feeds forward:** the concrete resource-to-shape mapping (which resource carries which of the 22 rows) is construction detail, left to ticket 13, not re-litigated here.
