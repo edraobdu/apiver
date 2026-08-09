@@ -15,7 +15,7 @@ is Deprecated or Sunset, or because a request names a Version that doesn't exist
 2. **Sunset enforcement.** What happens to a request against a Version past its sunset date — a hard 410
    Gone, per the `Sunset` glossary entry? Does apiver enforce this automatically once the date passes, or
    does hitting sunset require a deploy (freezing the check at process-start config vs. checking wall-clock
-   time on every request)?
+   time on every request)? Note per [09](09-squash-feasibility.md)/[ADR 0004](../../../docs/adr/0004-squash-feasibility.md): a Sunset Version stays `Live` (still mounted, still needs code to answer 410) — it only becomes `Archived` when its mount is removed, which is a separate, later decision from sunset itself.
 3. **Unknown-version gating.** A request for a Version that was never registered, or an Alias pointing
    nowhere. 404, or a distinguishable error shape?
 4. **Where does this read from?** Per [08](08-layout-and-manifest.md) item 8, gating reads live `Version`

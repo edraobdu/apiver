@@ -1,7 +1,8 @@
 # 09 — Squash feasibility gate
 
 Type: grilling
-Status: open
+Status: resolved
+Assignee: claude
 Blocked by: 08
 
 ## Question
@@ -33,3 +34,18 @@ Squash is **mandatory** — it's the answer to the endless-chain problem and it 
 
 - Settled: squash is mandatory, best-effort, output to a new directory, 1.0.
 - Settled: because `migrate` generates wiring rather than moving files, V1 may be scattered at squash time — squash reads V1's source *through the registry*, which points at exact classes. Confirm that indirection actually works.
+
+## Answer
+
+Recorded as [ADR 0004 — Squash feasibility](../../../docs/adr/0004-squash-feasibility.md). Glossary updated in [CONTEXT.md](../../../CONTEXT.md): added `Live` and `Archived` as lifecycle states, distinct from `Frozen` (mutability) and `Deprecated`/`Sunset` (service-lifecycle-while-live).
+
+1. **No manifest schema change needed.** Squash reads live `Version` objects, not the manifest; the real per-registration question — does this override actually subclass its parent's registered class? — is checked via reflection (`__mro__`) at squash time, not stored anywhere. Where there's no subclassing, "squashing" is a directory move, not an inlining problem.
+2. **Three-way flatten catalog**, replacing the ticket's flatter six-bullet list: mechanical splice (method/`Meta`/`@action`/`**kwargs` overrides — one technique, none of these are actually distinct problems), reflect-then-resynthesize (computed class attributes like `permission_classes` — LibCST can't evaluate expressions, so squash reads the resolved runtime value and emits fresh source), manual-review-only (in-chain multiple inheritance, and runtime-context-dependent logic like ticket 06's `del self.fields[...]` idiom).
+3. **Best-effort contract confirmed. Per-registration reporting, no global marker-density threshold** — the sharpened catalog shows true non-flattenable cases are narrower than assumed at charting, so an aggregate percentage would obscure more than it tells a developer.
+4. **No `--apply` flag, even at initial 1.0 ship.** Generates `api/v2_squashed/` plus a report and stops; promotion is a manual `git mv`.
+5. **Rebasing is a complementary, already-available escape hatch, not a squash substitute, and needs zero new library support** — it trades old-version availability for shed implementation debt, which is a different trade than squash makes.
+6. **LibCST confirmed via research** — feasible through `CSTTransformer` + `matchers` + `metadata` providers, but this is unprecedented, bespoke codemod work (no existing "flatten inheritance" tool found), not integration of an existing one. LibCST has no MRO engine, confirming that chain-boundary detection needs live registered classes, not syntax. Flagged explicitly so squash's eventual build ticket is sized as the hardest engineering in the roadmap, not routine integration.
+7. **0.1's README names squash as a roadmap direction with an honest caveat** — paired with the rebasing workaround from item 5 — rather than a firm promise or silence. Answers the "doesn't this get unwieldy" objection central to the deltas-forward pitch without overclaiming an unproven feature.
+8. **New: a `Live`/`Archived` guardrail, not just documentation, for the endless-chain worry.** A Version is Live while mounted (including Deprecated and Sunset — a Sunset Version still needs its mount to return 410); it becomes Archived only once unmounted. A Django system check — Warning level, reusing [ADR 0003](../../../docs/adr/0003-layout-and-manifest.md) item 9's mechanism — counts Live Versions off the live registry against a new setting `APIVER_MAX_LIVE_VERSIONS` (default 3), warning rather than blocking since nothing about serving breaks at 4 live versions. A project wanting a hard gate uses `manage.py check --fail-level WARNING`, no new apiver mechanism required.
+
+**Feeds forward:** squash's own build ticket (post-0.1, still fog) inherits the three-way technique list and the novelty warning rather than an open-ended "figure out LibCST" task. [12 — Gating semantics](12-gating-semantics.md) needs to account for `Live`/`Archived` alongside `Deprecated`/`Sunset`, since a Sunset Version stays Live by this definition.

@@ -94,3 +94,14 @@ _Avoid_: sunset (a stricter, later state)
 The point after which a deprecated Version stops serving and returns 410. Distinct from deprecation,
 which warns while still serving.
 _Avoid_: retirement, EOL
+
+**Live**:
+The state of a Version currently mounted in the URLconf — includes Deprecated and Sunset Versions, since
+a Sunset Version still needs its mount to answer with 410. Ends only when the Version is Archived, not
+when it Sunsets.
+_Avoid_: active (reads as "currently in development," the opposite of what's meant)
+
+**Archived**:
+The state of a Version once its mount is removed from the URLconf. Its code may still exist on disk — an
+Archived Version is not necessarily a Squashed or deleted one — but it stops counting as Live.
+_Avoid_: removed, deleted
