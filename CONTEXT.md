@@ -9,9 +9,17 @@ version presents a full API surface without duplicating it.
 ### Versions
 
 **Version**:
-An immutable, named snapshot of the API surface — `v1`, `v2`. A path always means the same thing under
-the same version.
+A named surface of the API — `v1`, `v2` — mutable while under construction and immutable once Frozen. A
+path means the same thing under a Frozen version for as long as that version exists. Any number of
+Versions may derive from the same parent; an unpromoted one (an experiment tried and abandoned) is not a
+distinct kind of Version, just one nobody pointed an Alias at for long.
 _Avoid_: release, revision
+
+**Frozen**:
+The one-way state change that ends a Version's mutability, entered explicitly rather than on a schedule or
+as a side effect of deployment. A Version may be derived from, registered to, and removed from freely
+before this point; attempting any of those after raises.
+_Avoid_: locked, published, released (a Version can be Frozen without ever being deployed)
 
 **Base Version**:
 The one version with no parent, from which every other derives. Its code may live anywhere in the project
@@ -76,6 +84,11 @@ _Avoid_: registry (which is DRF's term for a router's route list), config
 Flattening an authored Version's inheritance chain into standalone source, so earlier Versions can be
 deleted.
 _Avoid_: merge, collapse
+
+**Deprecation**:
+The state of a Version that still serves but signals it will eventually Sunset. Declared on the Version
+itself; the Manifest reflects it but never originates it.
+_Avoid_: sunset (a stricter, later state)
 
 **Sunset**:
 The point after which a deprecated Version stops serving and returns 410. Distinct from deprecation,
