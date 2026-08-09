@@ -1,8 +1,9 @@
 # 04 — The change-shape catalogue
 
 Type: grilling
-Status: open
+Status: resolved
 Blocked by: —
+Assignee: claude
 
 ## Question
 
@@ -44,3 +45,37 @@ Output: a table in this ticket's Answer, which becomes the build plan for the re
 - Settled: field removal gets a library helper if it earns one — see [06](06-field-removal.md).
 - Settled: route-level `remove()` is non-negotiable.
 - Settled: model/database-layer drift is out of scope (see map). Field removals *driven by a dropped column* are still in scope as an API-surface change; the DB side is not.
+
+## Answer
+
+Classification and diff-visibility are tracked as **two separate columns**, not one: several rows are trivial to *write* via plain inheritance but invisible to schema-diff, and collapsing that distinction would either mislabel an easy change as "unsupported" or hide a real blind spot behind a "clean" label. This split is what makes the "name the 20%" pitch honest.
+
+| # | Change-shape | Classification | Idiom | diff-visible? |
+|---|---|---|---|---|
+| 1 | Add optional response field | 🟢 clean | subclass adds field | ✅ |
+| 2 | Add required request field | 🟢 clean | subclass adds field | ✅ |
+| 3 | Change field type | 🟢 clean | redeclare field on subclass | ✅ |
+| 4 | Change nullable/required | 🟢 clean | redeclare field on subclass | ✅ |
+| 5 | Rename a field | 🟡 awkward | add new field (clean) + remove old (idiom → [06](06-field-removal.md)); no separate mechanism needed | ✅ but reported as delete+add, not rename |
+| 6 | Remove a field | 🟡 awkward | idiom pending [06](06-field-removal.md) | ✅ |
+| 7 | Change validation rules | 🟢/🟡 | redeclare field/validators | partial — declarative constraints (`max_length`, etc.) yes, custom `validate_*` logic no |
+| 8 | Change enum/choices | 🟢 clean | redeclare field | ✅ |
+| 9 | Restructure nesting (flat↔nested) | 🟡 awkward | redeclare field as nested/flat + possible method overrides | ✅ (type changes) |
+| 10 | Change `SerializerMethodField` output | 🟢 to write / 🔴 to detect | override `get_<field>` | ❌ |
+| 11 | Add new resource | 🟢 clean | new registration in V2 | ✅ |
+| 12 | Remove a resource | 🟢 clean | `v2.remove(prefix)` | ✅ |
+| 13 | Change URL prefix/path | 🟡 awkward | remove old + add new — no first-class "move" primitive in 0.1; accepted since it costs nothing new, but it's a known 0.2 `diff`-heuristic gap (bigger than field rename: drops a whole resource's route history, not just one field) | ✅ but as delete+add, loses history |
+| 14 | Add/change `@action` | 🟢 clean | inheritance / method override | ✅ |
+| 14b | Remove `@action` | 🟡 awkward | idiom pending [06](06-field-removal.md) | ✅ |
+| 15 | Change permissions/auth | 🟢 clean | override `permission_classes` | mostly ❌ |
+| 16 | Change pagination | 🟢 clean | override `pagination_class`/`page_size` | partial |
+| 17 | Change filtering/ordering/search | 🟢 clean | override `filter_backends`/`filterset_class` | partial |
+| 18 | Change default ordering | 🟢 clean | override `Meta.ordering`/`get_queryset` | ❌ — silent behavioural break, no schema delta at all |
+| 19 | Change error shape/status codes | 🟢 clean | override `get_exception_handler()` per view (DRF supports this per-class); documented alternative is a shared version-aware handler for teams that already centralize error shaping | mostly ❌ |
+| 20 | Throttling changes | 🟢 clean | override `throttle_classes` | mostly ❌ |
+| 21 | Content negotiation/renderer changes | 🟢 clean | override `renderer_classes` | partial — response media type shows in schema if it changes, custom renderer behavior doesn't |
+| 22 | Read-only/writable toggle | 🟢 clean | redeclare field with `read_only=`/`write_only=` | ✅ |
+
+**The honest 20%, in one line:** almost everything is clean by plain Python/DRF inheritance; what isn't clusters in two places — *subtraction* (rows 5, 6, 13, 14b, all resolving through ticket 06's removal idiom) and *diff blind spots* (rows 10, 15–20, trivial to write, invisible to schema-diff, so `check` in 0.2 can't catch them as breaking).
+
+Rows 20–22 (throttling, content negotiation, read-only/writable toggle) were added during this session, beyond the ticket's original list; bulk-endpoint shape changes were considered and left out, since they decompose into rows already covered (add/remove fields, add/remove actions) rather than being a distinct shape.

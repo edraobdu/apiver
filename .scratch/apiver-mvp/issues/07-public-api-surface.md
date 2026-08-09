@@ -32,3 +32,4 @@ Decide the complete public surface of 0.1:
 
 - Settled: DRF-only internals, framework-neutral public vocabulary. Keep the *names* portable, don't build the *layer*.
 - Settled: `apiver`, `django-apiver`, `drf-apiver` are all free on PyPI (see [research/01-prior-art.md](../research/01-prior-art.md)). Name choice is [10](10-name-and-positioning.md).
+- **Constraint from [05 — Prove the mechanism](05-prove-the-mechanism.md):** composition must build on `SimpleRouter`, not `DefaultRouter` — `DefaultRouter` emits an api-root view (plus a format-suffixed twin) even with zero registrations, breaking the 1:1 correspondence between a `Registration` and its resolved URL pattern that `diff`/`migrate`/squash need. If a per-version root listing is wanted, it has to be apiver's own construct, tracked in the resolution table, not DRF's.
