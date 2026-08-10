@@ -157,6 +157,38 @@ class Version:
         if self._frozen:
             raise RuntimeError(f"version {self.name!r} is frozen and cannot be {verb}.")
 
+    def _check_suffix(self, verb: str, handler: Any) -> None:
+        """Refuse a class-based handler whose name doesn't carry this
+        Version's suffix (ticket 11, ADR 0003 item 2).
+
+        drf-spectacular derives component and operation-id names from
+        `__class__.__name__` alone, with no awareness of which version module
+        a class lives in — so two same-named classes registered under
+        different versions silently collide, and the second one's schema is
+        dropped in favor of the first's (ADR 0003, ticket 03's finding).
+        Checked here, at register()/override() time, because the call
+        already holds the class object; no stack-frame introspection needed.
+
+        The Base Version (no parent) is exempt: it's the developer's
+        existing, unmodified API, and forcing a rename onto it would violate
+        the promise that adopting apiver leaves V1's code exactly where it
+        is. Non-class handlers (plain functions) are exempt too — there is
+        no `__name__` naming convention to enforce for those.
+        """
+        if self.parent is None or not isinstance(handler, type):
+            return
+        suffix = self.name.upper()
+        if suffix not in handler.__name__:
+            raise ValueError(
+                f"{handler.__name__!r} does not carry version {self.name!r}'s "
+                f"suffix ({suffix!r}) in its name, so it cannot be {verb} on "
+                f"version {self.name!r}. drf-spectacular names components and "
+                "operations after the class name alone, so a same-named class "
+                "in a different version module would silently emit the wrong "
+                "schema (ADR 0003 item 2). Rename the class to include "
+                f"{suffix!r}."
+            )
+
     def register(
         self,
         key: str,
@@ -176,6 +208,7 @@ class Version:
             )
 
         kind = _classify(handler)
+        self._check_suffix("registered", handler)
         if kind == "view":
             if name is None:
                 raise TypeError(
@@ -213,6 +246,7 @@ class Version:
             )
 
         kind = _classify(handler)
+        self._check_suffix("overridden", handler)
         if kind == "view":
             if name is None:
                 raise TypeError(

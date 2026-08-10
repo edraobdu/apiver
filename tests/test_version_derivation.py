@@ -1,7 +1,9 @@
 import pytest
+from rest_framework import viewsets
+from rest_framework.response import Response
 
 from apiver.drf import Version
-from tests.testapp.views import PaymentViewSet, PingViewSet, RefundViewSet
+from tests.testapp.views import PaymentViewSet, PingViewSet, RefundViewSetV2
 
 
 def test_derive_returns_a_new_version_with_self_as_parent():
@@ -66,13 +68,21 @@ def test_registrations_added_to_a_still_mutable_parent_are_visible_to_an_existin
 
 
 def test_deriving_twice_off_the_same_mutable_parent_gives_independent_branches():
+    class PingViewSetV2A(viewsets.ViewSet):
+        def list(self, request):
+            return Response({"status": "ok"})
+
+    class RefundViewSetV2B(viewsets.ViewSet):
+        def list(self, request):
+            return Response({"results": ["r1"]})
+
     v1 = Version("v1")
     v1.register("payments", PaymentViewSet, basename="payments")
 
     v2a = v1.derive("v2a")
     v2b = v1.derive("v2b")
-    v2a.register("ping", PingViewSet, basename="ping")
-    v2b.register("refunds", RefundViewSet, basename="refunds")
+    v2a.register("ping", PingViewSetV2A, basename="ping")
+    v2b.register("refunds", RefundViewSetV2B, basename="refunds")
 
     assert "^ping/$" in v2a.resolution_table
     assert "^ping/$" not in v2b.resolution_table
@@ -87,7 +97,7 @@ def test_a_child_can_register_a_new_key_the_parent_never_had():
     v1.register("payments", PaymentViewSet, basename="payments")
     v2 = v1.derive("v2")
 
-    v2.register("refunds", RefundViewSet, basename="refunds")
+    v2.register("refunds", RefundViewSetV2, basename="refunds")
 
     assert "^refunds/$" in v2.resolution_table
     assert "^refunds/$" not in v1.resolution_table

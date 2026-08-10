@@ -25,7 +25,7 @@ class PaymentViewSet(viewsets.ViewSet):
         return Response({"id": pk})
 
 
-class RefundViewSet(viewsets.ViewSet):
+class RefundViewSetV2(viewsets.ViewSet):
     def list(self, request):
         return Response({"results": ["r1"]})
 
@@ -36,14 +36,31 @@ class PaymentV2Serializer(serializers.Serializer):
 
 
 class PaymentViewSetV2(viewsets.ViewSet):
-    """Overrides PaymentViewSet with a different detail shape, and no list
-    route, so an override collapsing the route count doesn't leak the
-    parent's stale paths (ADR 0001 item 3)."""
+    """Overrides PaymentViewSet, one version deep, with a different detail
+    shape and no list route — used by the generic override-mechanics tests,
+    which register it onto a Version literally named "v2"."""
 
     serializer_class = PaymentV2Serializer
 
     def retrieve(self, request, pk=None):
         return Response({"id": pk, "version": "v2"})
+
+
+class PaymentV3Serializer(serializers.Serializer):
+    id = serializers.CharField()
+    version = serializers.CharField()
+
+
+class PaymentViewSetV3(viewsets.ViewSet):
+    """Overrides PaymentViewSet with a different detail shape, and no list
+    route, so an override collapsing the route count doesn't leak the
+    parent's stale paths (ADR 0001 item 3). This is the one actually wired
+    into the testapp's V3 in urls.py."""
+
+    serializer_class = PaymentV3Serializer
+
+    def retrieve(self, request, pk=None):
+        return Response({"id": pk, "version": "v3"})
 
 
 class PaymentsSummaryView(APIView):
