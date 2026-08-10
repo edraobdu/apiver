@@ -24,6 +24,15 @@ class RefundViewSet(viewsets.ViewSet):
         return Response({"results": ["r1"]})
 
 
+class PaymentViewSetV2(viewsets.ViewSet):
+    """Overrides PaymentViewSet with a different detail shape, and no list
+    route, so an override collapsing the route count doesn't leak the
+    parent's stale paths (ADR 0001 item 3)."""
+
+    def retrieve(self, request, pk=None):
+        return Response({"id": pk, "version": "v2"})
+
+
 class PaymentsSummaryView(APIView):
     def get(self, request):
         return Response({"summary": "ok"})

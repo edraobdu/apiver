@@ -114,16 +114,18 @@ def _route_identity(url_pattern: Any) -> RouteIdentity:
 class Version:
     """A named surface of the API, composed from Registrations.
 
-    override(), remove() and freeze() land in a later ticket (#9). This ticket
-    adds derive() and live inheritance: a Version with a parent composes its
-    parent's resolution table alongside its own, walked fresh at build time
-    (ADR 0002 item 2) rather than copied at derive() time.
+    A Version with a parent composes its parent's resolution table alongside
+    its own, walked fresh at build time (ADR 0002 item 2) rather than copied
+    at derive() time. It stays mutable — register()/override()/remove() all
+    work — until freeze() is called (ADR 0002 item 2).
     """
 
     def __init__(self, name: str):
         self.name = name
         self.parent: Version | None = None
         self._registrations: dict[str, Registration] = {}
+        self._removed: set[str] = set()
+        self._frozen = False
         self._own_build_cache: tuple[list, dict[str, Route]] | None = None
 
     def derive(self, name: str) -> "Version":
@@ -139,11 +141,20 @@ class Version:
         child.parent = self
         return child
 
-    def _all_registration_keys(self) -> set[str]:
+    def _resolved_keys(self) -> set[str]:
+        """Keys currently resolvable through this Version, respecting removals.
+
+        A key removed here (or by an ancestor, at its own level) no longer
+        counts as present, so it can be re-registered from scratch.
+        """
         keys = set(self._registrations)
         if self.parent is not None:
-            keys |= self.parent._all_registration_keys()
+            keys |= self.parent._resolved_keys() - self._removed
         return keys
+
+    def _check_not_frozen(self, verb: str) -> None:
+        if self._frozen:
+            raise RuntimeError(f"version {self.name!r} is frozen and cannot be {verb}.")
 
     def register(
         self,
@@ -153,7 +164,11 @@ class Version:
         basename: str | None = None,
         name: str | None = None,
     ) -> "Version":
-        if key in self._all_registration_keys():
+        """Bind a new key. Raises if the key already exists anywhere up the
+        parent chain — use override() to replace an existing Registration
+        (ADR 0002 item 3)."""
+        self._check_not_frozen("mutated")
+        if key in self._resolved_keys():
             raise ValueError(
                 f"{key!r} is already registered on version {self.name!r} or one of its ancestors."
             )
@@ -172,6 +187,68 @@ class Version:
             key=key, kind=kind, handler=handler, basename=basename, name=name
         )
         self._own_build_cache = None
+        return self
+
+    def override(
+        self,
+        key: str,
+        handler: Any,
+        *,
+        basename: str | None = None,
+        name: str | None = None,
+    ) -> "Version":
+        """Replace an existing Registration. Raises if the key doesn't exist
+        anywhere up the parent chain — use register() for a genuinely new key
+        (ADR 0002 item 3). The whole Registration is replaced, so every path
+        it previously expanded into is replaced too (ADR 0001 item 3); a
+        narrower, sub-route override isn't expressible through this key space
+        by design."""
+        self._check_not_frozen("mutated")
+        if key not in self._resolved_keys():
+            raise ValueError(
+                f"{key!r} is not registered on version {self.name!r} or any of its "
+                "ancestors, so it cannot be overridden."
+            )
+
+        kind = _classify(handler)
+        if kind == "view":
+            if name is None:
+                raise TypeError(
+                    f"overriding {handler!r} at {key!r} requires an explicit name= "
+                    "— there is no router to derive one from (ADR 0002 item 3)."
+                )
+        else:
+            basename = basename or key
+
+        self._registrations[key] = Registration(
+            key=key, kind=kind, handler=handler, basename=basename, name=name
+        )
+        self._own_build_cache = None
+        return self
+
+    def remove(self, key: str) -> "Version":
+        """Erase a Registration from this Version's resolved surface. Raises
+        if the key isn't present in the resolved parent chain (ADR 0002 item
+        4) — a removal that silently does nothing must not be shippable. An
+        ancestor keeps serving the key; only this Version and its descendants
+        stop."""
+        self._check_not_frozen("mutated")
+        if key not in self._resolved_keys():
+            raise ValueError(
+                f"{key!r} is not registered on version {self.name!r} or any of its "
+                "ancestors, so it cannot be removed."
+            )
+
+        self._registrations.pop(key, None)
+        self._removed.add(key)
+        self._own_build_cache = None
+        return self
+
+    def freeze(self) -> "Version":
+        """End this Version's mutability, one-way (ADR 0002 item 2). After
+        this, register()/override()/remove() all raise. derive() is
+        unaffected — freezing a parent is independent of branching from it."""
+        self._frozen = True
         return self
 
     def _build_own(self) -> tuple[list, dict[str, Route]]:
@@ -226,6 +303,20 @@ class Version:
         # inherited callback objects and their Route metadata — are the same
         # objects across separate builds, not rebuilt copies.
         parent_patterns, parent_table = self.parent._build()
+
+        # Shadowed keys (removed, or overridden by an own registration) drop
+        # their parent's paths entirely rather than being merged over: an
+        # override whose new shape has fewer routes than the parent's must
+        # not leave stale parent-only paths behind (ADR 0001 item 3).
+        shadowed = self._removed | set(self._registrations)
+        if shadowed:
+            parent_table = {
+                path: route
+                for path, route in parent_table.items()
+                if route.registration is None or route.registration.key not in shadowed
+            }
+            parent_patterns = [pattern for pattern in parent_patterns if _path_str(pattern) in parent_table]
+
         combined_table = {**parent_table, **own_table}
         combined_patterns = own_patterns + parent_patterns
         return combined_patterns, combined_table
