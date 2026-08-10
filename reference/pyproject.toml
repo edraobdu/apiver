@@ -1,0 +1,22 @@
+[project]
+name = "apiver-reference"
+version = "0.0.0"
+description = "A plain, pre-apiver DRF project — the messy 'before' state apiver's library will be built against, one capability at a time."
+requires-python = ">=3.12"
+dependencies = [
+    "django~=6.1",
+    "djangorestframework~=3.18",
+    "drf-spectacular~=0.30",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-django>=4.9",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["test_*.py"]
+testpaths = ["tests"]
+pythonpath = ["."]
