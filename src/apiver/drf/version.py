@@ -170,7 +170,8 @@ class Version:
         self._check_not_frozen("mutated")
         if key in self._resolved_keys():
             raise ValueError(
-                f"{key!r} is already registered on version {self.name!r} or one of its ancestors."
+                f"{key!r} is already registered on version {self.name!r} or one of its ancestors. "
+                "Use override() to replace it."
             )
 
         kind = _classify(handler)
@@ -207,7 +208,7 @@ class Version:
         if key not in self._resolved_keys():
             raise ValueError(
                 f"{key!r} is not registered on version {self.name!r} or any of its "
-                "ancestors, so it cannot be overridden."
+                "ancestors, so it cannot be overridden. Use register() to add it."
             )
 
         kind = _classify(handler)
