@@ -19,6 +19,11 @@ class PaymentViewSet(viewsets.ViewSet):
         return Response({"id": pk})
 
 
+class RefundViewSet(viewsets.ViewSet):
+    def list(self, request):
+        return Response({"results": ["r1"]})
+
+
 class PaymentsSummaryView(APIView):
     def get(self, request):
         return Response({"summary": "ok"})
