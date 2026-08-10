@@ -12,6 +12,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-django>=4.9",
+    "ruff>=0.14",
 ]
 
 [tool.pytest.ini_options]
@@ -19,6 +20,17 @@ DJANGO_SETTINGS_MODULE = "tests.settings"
 python_files = ["test_*.py"]
 testpaths = ["tests"]
 pythonpath = ["src", "."]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = ["reference", ".scratch"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["apiver"]
 
 [build-system]
 requires = ["hatchling"]
