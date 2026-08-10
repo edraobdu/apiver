@@ -32,6 +32,12 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.lint.isort]
 known-first-party = ["apiver"]
 
+[tool.ruff.lint.per-file-ignores]
+# Accessing a property for its side effect under pytest.raises() is the
+# idiomatic way to exercise a lazy-computed property that raises — not a
+# genuinely useless expression.
+"tests/*" = ["B018"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
