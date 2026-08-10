@@ -5,10 +5,10 @@ from apiver.drf import Version
 from .views import (
     PaymentsSummaryView,
     PaymentViewSet,
-    PaymentViewSetV2,
+    PaymentViewSetV3,
     PingViewSet,
     PlainPingView,
-    RefundViewSet,
+    RefundViewSetV2,
     pong,
 )
 
@@ -22,12 +22,12 @@ v1.register("plain-ping/", PlainPingView, name="plain-ping")
 # V2 never registers payments/ping/etc itself — it inherits v1's entire
 # resolution table live, and only adds what's new to it (ticket 08).
 v2 = v1.derive("v2")
-v2.register("refunds", RefundViewSet, basename="refunds")
+v2.register("refunds", RefundViewSetV2, basename="refunds")
 
 # V3 exercises the loud verbs (ticket 09): payments gets a new shape, ping
 # is gone under V3 while V1/V2 keep serving it unchanged.
 v3 = v2.derive("v3")
-v3.override("payments", PaymentViewSetV2, basename="payments")
+v3.override("payments", PaymentViewSetV3, basename="payments")
 v3.remove("ping")
 
 v1.freeze()

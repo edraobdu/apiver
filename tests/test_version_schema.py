@@ -56,7 +56,7 @@ def test_removed_resource_is_absent_from_the_removing_versions_schema(client):
 
 
 def test_overridden_resources_dropped_route_leaves_no_stale_path(client):
-    """PaymentViewSetV2 has no list action, so V3's schema must not carry
+    """PaymentViewSetV3 has no list action, so V3's schema must not carry
     the parent's now-stale list path (ADR 0001 item 3)."""
     doc = _schema(client, "v3")
 
@@ -78,8 +78,8 @@ def test_overridden_resource_gets_its_own_component_not_the_parents(client):
     v3_doc = _schema(client, "v3")
 
     assert "Payment" in v1_doc["components"]["schemas"]
-    assert "PaymentV2" in v3_doc["components"]["schemas"]
-    assert v1_doc["components"]["schemas"]["Payment"] != v3_doc["components"]["schemas"]["PaymentV2"]
+    assert "PaymentV3" in v3_doc["components"]["schemas"]
+    assert v1_doc["components"]["schemas"]["Payment"] != v3_doc["components"]["schemas"]["PaymentV3"]
 
 
 def test_schema_path_prefix_is_pinned_so_operation_ids_dont_drift(client):

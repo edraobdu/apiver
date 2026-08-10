@@ -1,7 +1,7 @@
 import pytest
 
 from apiver.drf import Version
-from tests.testapp.views import PaymentViewSet, PaymentViewSetV2, PingViewSet, RefundViewSet
+from tests.testapp.views import PaymentViewSet, PaymentViewSetV2, PingViewSet, RefundViewSetV2
 
 
 def test_override_replaces_the_registration():
@@ -130,7 +130,7 @@ def test_freeze_does_not_block_derive():
 
     v2 = v1.derive("v2")
 
-    v2.register("refunds", RefundViewSet, basename="refunds")
+    v2.register("refunds", RefundViewSetV2, basename="refunds")
     assert "^refunds/$" in v2.resolution_table
 
 
@@ -139,6 +139,6 @@ def test_freeze_does_not_affect_an_already_derived_childs_mutability():
     v2 = v1.derive("v2")
     v1.freeze()
 
-    v2.register("refunds", RefundViewSet, basename="refunds")
+    v2.register("refunds", RefundViewSetV2, basename="refunds")
 
     assert "^refunds/$" in v2.resolution_table
