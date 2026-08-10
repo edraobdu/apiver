@@ -1,4 +1,5 @@
 import pytest
+from django.urls import reverse
 from rest_framework.test import APIClient
 
 
@@ -46,3 +47,32 @@ def test_plain_django_view_answers_a_real_request(client):
 
     assert response.status_code == 200
     assert response.json() == {"status": "plain"}
+
+
+def test_derived_version_serves_a_route_it_never_registered_itself(client):
+    """V2 never registered payments/ — it inherits it live from V1 (ticket 08)."""
+    response = client.get("/api/v2/payments/42/")
+
+    assert response.status_code == 200
+    assert response.json() == {"id": "42"}
+
+
+def test_derived_version_serves_a_route_it_registered_itself(client):
+    response = client.get("/api/v2/refunds/")
+
+    assert response.status_code == 200
+    assert response.json() == {"results": ["r1"]}
+
+
+def test_a_route_added_only_to_the_derived_version_is_not_served_by_the_base(client):
+    response = client.get("/api/v1/refunds/")
+
+    assert response.status_code == 404
+
+
+def test_base_version_reverse_uses_bare_names_and_resolves_to_the_base_mount():
+    assert reverse("payments-detail", args=["42"]) == "/api/v1/payments/42/"
+
+
+def test_derived_version_reverse_is_namespaced_and_resolves_to_its_own_mount():
+    assert reverse("v2:payments-detail", args=["42"]) == "/api/v2/payments/42/"

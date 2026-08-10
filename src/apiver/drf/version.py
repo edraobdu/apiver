@@ -113,14 +113,36 @@ def _route_identity(url_pattern: Any) -> RouteIdentity:
 class Version:
     """A named surface of the API, composed from Registrations.
 
-    derive(), override(), remove() and freeze() land in later tickets (#8, #9);
-    this ticket is about making register() and its resolution correct for
-    every route type, not just router-registered ViewSets.
+    override(), remove() and freeze() land in a later ticket (#9). This ticket
+    adds derive() and live inheritance: a Version with a parent composes its
+    parent's resolution table alongside its own, walked fresh at build time
+    (ADR 0002 item 2) rather than copied at derive() time.
     """
 
     def __init__(self, name: str):
         self.name = name
+        self.parent: "Version | None" = None
         self._registrations: dict[str, Registration] = {}
+        self._own_build_cache: tuple[list, dict[str, Route]] | None = None
+
+    def derive(self, name: str) -> "Version":
+        """Return a new Version whose parent is `self`.
+
+        Not a constructor kwarg (ADR 0002 item 1) — the parent is set by the
+        verb, so lineage order can't be passed out of sequence. `self` need
+        not be frozen, and may be derived from any number of times; each
+        child walks `self` live at composition time, so branching falls out
+        without special-casing (ADR 0002 item 2).
+        """
+        child = Version(name)
+        child.parent = self
+        return child
+
+    def _all_registration_keys(self) -> set[str]:
+        keys = set(self._registrations)
+        if self.parent is not None:
+            keys |= self.parent._all_registration_keys()
+        return keys
 
     def register(
         self,
@@ -130,8 +152,11 @@ class Version:
         basename: str | None = None,
         name: str | None = None,
     ) -> "Version":
-        if key in self._registrations:
-            raise ValueError(f"{key!r} is already registered on version {self.name!r}.")
+        if key in self._all_registration_keys():
+            raise ValueError(
+                f"{key!r} is already registered on version {self.name!r} or one of its "
+                "ancestors."
+            )
 
         kind = _classify(handler)
         if kind == "view":
@@ -146,9 +171,13 @@ class Version:
         self._registrations[key] = Registration(
             key=key, kind=kind, handler=handler, basename=basename, name=name
         )
+        self._own_build_cache = None
         return self
 
-    def _build(self) -> tuple[list, dict[str, Route]]:
+    def _build_own(self) -> tuple[list, dict[str, Route]]:
+        if self._own_build_cache is not None:
+            return self._own_build_cache
+
         router = SimpleRouter()
         view_patterns = []
         registrations_by_basename: dict[str, Registration] = {}
@@ -181,7 +210,25 @@ class Version:
             table[_path_str(pattern)] = Route(identity=identity, registration=registration)
 
         self._verify(table)
-        return patterns, table
+        self._own_build_cache = (patterns, table)
+        return self._own_build_cache
+
+    def _build(self) -> tuple[list, dict[str, Route]]:
+        own_patterns, own_table = self._build_own()
+        if self.parent is None:
+            return own_patterns, own_table
+
+        # Live composition (ADR 0002 item 2): re-walk the parent on every
+        # build rather than snapshotting at derive() time, so registrations
+        # added to a still-mutable parent are visible immediately. The
+        # parent's own patterns/table are cached at *its* level and only
+        # invalidated by its own mutations, so unchanged entries — the
+        # inherited callback objects and their Route metadata — are the same
+        # objects across separate builds, not rebuilt copies.
+        parent_patterns, parent_table = self.parent._build()
+        combined_table = {**parent_table, **own_table}
+        combined_patterns = own_patterns + parent_patterns
+        return combined_patterns, combined_table
 
     def _verify(self, table: dict[str, Route]) -> None:
         produced = {route.registration for route in table.values() if route.registration is not None}
@@ -202,7 +249,11 @@ class Version:
 
     @property
     def urls(self):
-        # Base version (no parent yet): bare URL names, no app_name — ADR 0001
-        # item 4. Namespacing only applies to authored Versions, built later.
+        # Base version (no parent): bare URL names, no app_name (ADR 0001
+        # item 4). A derived Version is mounted under a Django instance
+        # namespace matching its own name, so `include(v2.urls)` needs no
+        # explicit namespace= to make `reverse("v2:...")` work (ADR 0002
+        # item 7).
         patterns, _ = self._build()
-        return patterns, None
+        app_name = self.name if self.parent is not None else None
+        return patterns, app_name
