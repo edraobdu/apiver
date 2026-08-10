@@ -45,7 +45,7 @@ def test_parent_is_unmutated_and_still_reusable_after_a_child_is_composed():
     table_before = v1.resolution_table
 
     v2 = v1.derive("v2")
-    _ = v2.resolution_table
+    v2.resolution_table
 
     table_after = v1.resolution_table
     assert table_after.keys() == table_before.keys()
