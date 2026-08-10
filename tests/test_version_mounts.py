@@ -76,3 +76,38 @@ def test_base_version_reverse_uses_bare_names_and_resolves_to_the_base_mount():
 
 def test_derived_version_reverse_is_namespaced_and_resolves_to_its_own_mount():
     assert reverse("v2:payments-detail", args=["42"]) == "/api/v2/payments/42/"
+
+
+def test_overridden_resource_serves_the_new_shape_under_the_child(client):
+    response = client.get("/api/v3/payments/42/")
+
+    assert response.status_code == 200
+    assert response.json() == {"id": "42", "version": "v2"}
+
+
+def test_overridden_resource_still_serves_the_old_shape_under_the_parent(client):
+    response = client.get("/api/v1/payments/42/")
+
+    assert response.status_code == 200
+    assert response.json() == {"id": "42"}
+
+
+def test_override_that_drops_a_route_leaves_no_stale_parent_path_behind(client):
+    """PaymentViewSetV2 has no list action, so /api/v3/payments/ must not
+    fall through to the parent's list route (ADR 0001 item 3)."""
+    response = client.get("/api/v3/payments/")
+
+    assert response.status_code == 404
+
+
+def test_removed_resource_404s_under_the_child(client):
+    response = client.get("/api/v3/ping/")
+
+    assert response.status_code == 404
+
+
+def test_removed_resource_still_serves_under_the_parent(client):
+    response = client.get("/api/v2/ping/")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
