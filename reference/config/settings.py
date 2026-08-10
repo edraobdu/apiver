@@ -26,6 +26,14 @@ DATABASES = {
     }
 }
 
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "APP_DIRS": True,
+        "OPTIONS": {},
+    }
+]
+
 ROOT_URLCONF = "config.urls"
 
 REST_FRAMEWORK = {

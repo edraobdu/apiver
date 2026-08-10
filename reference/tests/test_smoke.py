@@ -92,3 +92,11 @@ def test_schema_generates_without_error(client):
 
     assert response.status_code == 200
     assert response["Content-Type"].startswith("application/vnd.oai.openapi")
+
+
+def test_docs_page_renders(client):
+    """Regression: TEMPLATES wasn't configured, so drf_spectacular's bundled
+    swagger_ui.html template was never discoverable and this 500'd."""
+    response = client.get("/api/docs/")
+
+    assert response.status_code == 200
