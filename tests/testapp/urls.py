@@ -36,4 +36,7 @@ urlpatterns = [
     path("api/v1/", include(v1.urls)),
     path("api/v2/", include(v2.urls)),
     path("api/v3/", include(v3.urls)),
+    path("api/v1/schema/", v1.schema_view(prefix="api/v1/"), name="v1-schema"),
+    path("api/v2/schema/", v2.schema_view(prefix="api/v2/"), name="v2-schema"),
+    path("api/v3/schema/", v3.schema_view(prefix="api/v3/"), name="v3-schema"),
 ]

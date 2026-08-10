@@ -8,8 +8,20 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
     "rest_framework",
+    "drf_spectacular",
     "tests.testapp",
 ]
+
+REST_FRAMEWORK = {
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "apiver test app",
+    "DESCRIPTION": "",
+    "VERSION": "0.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+}
 
 DATABASES = {
     "default": {

@@ -1,6 +1,6 @@
 from django.http import JsonResponse
 from django.views import View
-from rest_framework import viewsets
+from rest_framework import serializers, viewsets
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -11,7 +11,13 @@ class PingViewSet(viewsets.ViewSet):
         return Response({"status": "ok"})
 
 
+class PaymentSerializer(serializers.Serializer):
+    id = serializers.CharField()
+
+
 class PaymentViewSet(viewsets.ViewSet):
+    serializer_class = PaymentSerializer
+
     def list(self, request):
         return Response({"results": ["p1", "p2"]})
 
@@ -24,10 +30,17 @@ class RefundViewSet(viewsets.ViewSet):
         return Response({"results": ["r1"]})
 
 
+class PaymentV2Serializer(serializers.Serializer):
+    id = serializers.CharField()
+    version = serializers.CharField()
+
+
 class PaymentViewSetV2(viewsets.ViewSet):
     """Overrides PaymentViewSet with a different detail shape, and no list
     route, so an override collapsing the route count doesn't leak the
     parent's stale paths (ADR 0001 item 3)."""
+
+    serializer_class = PaymentV2Serializer
 
     def retrieve(self, request, pk=None):
         return Response({"id": pk, "version": "v2"})
