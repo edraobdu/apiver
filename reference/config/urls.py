@@ -1,28 +1,25 @@
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
-from rest_framework.routers import DefaultRouter
 
 from healthz import healthz
-from legacy.views import LegacyInvoiceViewSet
-from orders.views import OrderViewSet
-from payments.views import PaymentsSummaryView, PaymentViewSet
-from users.views import UserViewSet
 
-# DefaultRouter, because that's what most projects reach for first — the API-root
-# view and format-suffixed patterns it adds are exactly the kind of thing that
-# makes adopting a delta-composition router later interesting.
-router = DefaultRouter()
-router.register("users", UserViewSet, basename="users")
-router.register("payments", PaymentViewSet, basename="payments")
-router.register("orders", OrderViewSet, basename="orders")
-router.register("legacy-invoices", LegacyInvoiceViewSet, basename="legacy-invoices")
-
+# Every app owns its own urls.py and its own choice of router (DefaultRouter here,
+# SimpleRouter there) — nobody sat down and picked one convention for the whole
+# project, which is exactly how most real codebases end up. This root file just
+# recurses into them: the thing apiver eventually has to walk is *this* resolved
+# tree, however many include() layers deep it goes, not a single flat router.
 urlpatterns = [
     path("api/healthz/", healthz, name="healthz"),
-    # explicit view before router.urls: the router's detail-route regex is
-    # generic enough to swallow "payments/summary/" as pk="summary" otherwise
-    path("api/payments/summary/", PaymentsSummaryView.as_view(), name="payments-summary"),
-    path("api/", include(router.urls)),
+    path("api/", include("users.urls")),
+    path("api/", include("payments.urls")),
+    path("api/", include("orders.urls")),
+    path("api/", include("legacy.urls")),
+    path("api/", include("addresses.urls")),
+    path("api/", include("notifications.urls")),
+    # Deliberately the deepest mount in the project — a plausible rename target
+    # for a future version (catalogue row 13), and proof the walk can't assume
+    # every resource sits one segment under "api/".
+    path("api/integrations/webhooks/", include("webhooks.urls")),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
 ]

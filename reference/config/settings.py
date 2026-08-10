@@ -17,6 +17,9 @@ INSTALLED_APPS = [
     "payments",
     "orders",
     "legacy",
+    "addresses",
+    "notifications",
+    "webhooks",
 ]
 
 DATABASES = {
@@ -40,6 +43,9 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
+    # High enough that the smoke suite never trips it — the throttle *existing* on
+    # notifications is the seed (catalogue row 20), not exercising the 429 itself.
+    "DEFAULT_THROTTLE_RATES": {"user": "1000/day"},
 }
 
 SPECTACULAR_SETTINGS = {
