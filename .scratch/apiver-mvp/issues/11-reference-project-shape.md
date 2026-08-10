@@ -35,7 +35,7 @@ Decide:
 
 3. **Same project doubles as the drf-spectacular correctness demo.** One project serves both purposes, as [03](03-spectacular-integration.md) already assumed. No second parallel DRF project.
 
-4. **Promote [05](05-prove-the-mechanism.md)'s spike — domain shape only, not internals.** The spike's `users`/`payments`/`orders` resources, serializers, and routes carry forward from branch `prototype/05-mechanism-spike` into the permanent reference project. Its throwaway `apiver_core.py` composition layer does not — that gets replaced with the real public API from [07](07-public-api-surface.md) and the enforced layout from [08](08-layout-and-manifest.md).
+4. **Promote [05](05-prove-the-mechanism.md)'s spike — domain shape only, not internals.** The spike's `users`/`payments`/`orders` resources, serializers, and routes carry forward — archived under `.scratch/apiver-mvp/prototypes/05-spike/` — into the permanent reference project. Its throwaway `apiver_core.py` composition layer does not — that gets replaced with the real public API from [07](07-public-api-surface.md) and the enforced layout from [08](08-layout-and-manifest.md).
 
 5. **Sequencing confirmed.** This ticket produced the plan only. [07](07-public-api-surface.md) and [08](08-layout-and-manifest.md) are both already resolved, so the reference-project build ticket is unblocked immediately — graduated as [13 — Build the reference project](13-build-reference-project.md).
 

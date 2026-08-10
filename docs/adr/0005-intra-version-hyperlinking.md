@@ -12,7 +12,7 @@ silently, with every route still resolving and every routing test still passing.
 class of quiet wrongness the rest of apiver's design exists to prevent, so it is settled before
 0.1 ships rather than deferred.
 
-Resolved against a working prototype on branch `prototype/20-version-aware-reverse` (79 tests,
+Resolved against a working prototype (79 tests,
 built on `reference/`). Findings below are measured, not reasoned.
 
 ## Decision
