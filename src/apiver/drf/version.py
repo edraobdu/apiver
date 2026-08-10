@@ -2,7 +2,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from django.urls import path
+from django.urls import include, path
+from drf_spectacular.views import SpectacularAPIView
 from rest_framework.routers import BaseRouter, SimpleRouter
 from rest_framework.viewsets import ViewSetMixin
 
@@ -349,3 +350,34 @@ class Version:
         patterns, _ = self._build()
         app_name = self.name if self.parent is not None else None
         return patterns, app_name
+
+    def schema_view(
+        self,
+        *,
+        prefix: str,
+        title: str | None = None,
+        description: str | None = None,
+        version: str | None = None,
+    ):
+        """A view serving this Version's own OpenAPI document, and nothing
+        else's.
+
+        `prefix` is the exact first argument passed to the `path()` this
+        Version is mounted under (e.g. `"api/v2/"`) — it re-derives the
+        version's absolute URLs for the generator and pins
+        `SCHEMA_PATH_PREFIX` from it, since the auto-estimated prefix drifts
+        with every route added or removed (ADR 0002 Consequences, ticket 10).
+        The generator is built with `patterns=` scoped to exactly this
+        Version's own mounted patterns — not the whole project's urlconf —
+        so sibling versions' routes can never leak in and drf-spectacular's
+        `(path, method)`-keyed dedup can never collide across versions (ADR
+        0002 Consequences).
+        """
+        mount = [path(prefix, include(self.urls))]
+        custom_settings = {"SCHEMA_PATH_PREFIX": "/" + prefix.strip("/")}
+        if title is not None:
+            custom_settings["TITLE"] = title
+        if description is not None:
+            custom_settings["DESCRIPTION"] = description
+        custom_settings["VERSION"] = version if version is not None else self.name
+        return SpectacularAPIView.as_view(patterns=mount, custom_settings=custom_settings)
