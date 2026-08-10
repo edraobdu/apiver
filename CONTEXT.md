@@ -73,6 +73,13 @@ _Avoid_: lookup, dispatch (which is DRF's term for method routing within a view)
 Building a Version's complete resolution table from its parent's table plus its own Delta.
 _Avoid_: merging, flattening (reserved for squash)
 
+**Serving Version**:
+The Version a request resolved into, carried on the request from the moment its mount is entered.
+Distinct from the Version a handler was *registered* in — one Registration is inherited by many
+Versions, so only the request can say which one is serving (ADR 0005). Read by gating, by
+version-aware link generation, and by any version-conditional logic in a view or serializer.
+_Avoid_: current version, active version (which reads as "in development", per Live)
+
 ### Lifecycle
 
 **Manifest**:
