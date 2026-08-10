@@ -1,5 +1,6 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from django.urls import path
 from rest_framework.routers import BaseRouter, SimpleRouter
@@ -121,7 +122,7 @@ class Version:
 
     def __init__(self, name: str):
         self.name = name
-        self.parent: "Version | None" = None
+        self.parent: Version | None = None
         self._registrations: dict[str, Registration] = {}
         self._own_build_cache: tuple[list, dict[str, Route]] | None = None
 
@@ -154,8 +155,7 @@ class Version:
     ) -> "Version":
         if key in self._all_registration_keys():
             raise ValueError(
-                f"{key!r} is already registered on version {self.name!r} or one of its "
-                "ancestors."
+                f"{key!r} is already registered on version {self.name!r} or one of its ancestors."
             )
 
         kind = _classify(handler)

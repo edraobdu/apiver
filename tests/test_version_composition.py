@@ -92,4 +92,4 @@ def test_composition_self_verification_catches_an_unaccounted_pattern(monkeypatc
     monkeypatch.setattr(SimpleRouter, "get_urls", rogue_get_urls)
 
     with pytest.raises(CompositionError):
-        v1.urls
+        _ = v1.urls
