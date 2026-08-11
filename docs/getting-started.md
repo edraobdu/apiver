@@ -107,22 +107,28 @@ version gets a name, not the moment old clients get broken. Retiring the unversi
 project wants to at all) is a separate, deliberate decision the developer makes on their own
 timeline — not a side effect of running `migrate`.
 
-### If the project has its own drf-spectacular schema/docs views
+### The base version's schema and docs routes are automatically renamed
 
 If the pre-existing project already serves its own `SpectacularAPIView`/`SpectacularSwaggerView`
-(most do) and stays mounted per the additive model above, expect one specific, easy-to-miss
-collision: the Base Version deliberately reuses *bare*, unnamespaced route names — including
-whatever the pre-existing schema/docs views were named — so that anything elsewhere in the project
-already reversing those names by their old, pre-apiver identity keeps resolving (ADR 0001 item 4).
-Kept side by side with the pre-existing routes of the *same* names, this is an actual collision, not
-just redundancy: Django's `reverse()` for an unqualified name matches the last-registered pattern,
-so the pre-existing docs page can silently start rendering `migrate`'s newly-adopted schema instead
-of its own — same HTTP status either way, wrong body. Only routes that actually get `reverse()`d at
-request time surface this (in practice: just the schema and docs routes); rename the newly-generated
-ones in `registry.py` to something distinct, and re-point the docs view's `url_name` at the new name:
+(most do) and stays mounted per the additive model above, there's a name (not path) collision
+waiting to happen: the Base Version otherwise reuses *bare*, unnamespaced route names verbatim,
+including whatever the pre-existing schema/docs views were named, so that anything elsewhere in the
+project already reversing those names by their old, pre-apiver identity keeps resolving (ADR 0001
+item 4). Kept side by side with the pre-existing routes of the *same* names, that's a real collision:
+Django's `reverse()` for an unqualified name matches the last-registered pattern, so the pre-existing
+docs page could silently start rendering the newly-adopted schema instead of its own — same HTTP
+status either way, wrong body.
+
+The Base Version *is* a new version, distinct from whatever pre-existing paths it was adopted from —
+so `migrate` gives its schema and docs routes their own, version-qualified names automatically,
+rather than requiring a hand-edit after the fact. A discovered `SpectacularAPIView` is always named
+`f"{base_name}-schema"` (`"v1-schema"`), regardless of what the original route was named or whether
+it was named at all; a discovered `SpectacularSwaggerView`/`SpectacularRedocView` is named
+`f"{base_name}-{original_name}"` (`"v1-docs"`) and has its own `url_name` repointed at the qualified
+schema name:
 
 ```python
-# api/v1/registry.py — hand-edited after migrate generated it
+# api/v1/registry.py — generated, not hand-edited
 v1.register('docs/', SpectacularSwaggerView.as_view(url_name='v1-schema'), name='v1-docs')
 ...
 v1.register('schema/', v1.schema_view(prefix='api/v1/'), name='v1-schema')
@@ -272,9 +278,13 @@ what doesn't work the first time.
   (chosen so anything already reversing them by their old identity keeps working, ADR 0001 item 4)
   collided with the pre-existing project's own identically-named `schema`/`docs` routes, and Django's
   `reverse()` picked the new one — same HTTP status, silently wrong body. Caught only by asserting the
-  actual embedded target URL, not just that the page rendered. Fixed by hand-renaming the newly
-  generated routes (see "If the project has its own drf-spectacular schema/docs views" above), with a
-  test locking in the correct target for all three docs pages (old, v1, v2).
+  actual embedded target URL, not just that the page rendered. **Fixed in the library**, not just
+  documented: `migrate` now gives a discovered schema route a version-qualified name
+  (`f"{base_name}-schema"`) unconditionally, and repoints every discovered Swagger/Redoc view's
+  `url_name` at it — the Base Version is a genuinely new version, so it shouldn't share a name with
+  whatever it was adopted from, any more than an authored version would (see "The base version's
+  schema and docs routes are automatically renamed" above). Both the library's own CLI tests and
+  `reference/`'s HTTP tests assert the qualified names/targets directly.
 - **The version-suffix rule has no "but it didn't actually change" exception**, and this surfaces in
   two non-obvious places: overriding the *inherited* schema/docs routes (which need `override()`,
   since `migrate` already registered them on the Base Version), and re-registering a handler at a new

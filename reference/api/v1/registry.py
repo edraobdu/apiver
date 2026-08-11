@@ -17,13 +17,6 @@ from webhooks.views import WebhookEndpointViewSet
 
 v1 = Version('v1')
 v1.register('addresses', AddressViewSet, basename='addresses')
-# Renamed by hand from the names `apiver migrate` discovered ('docs'/'schema') —
-# this project keeps its pre-existing, unversioned api/docs/ and api/schema/
-# mounted too (adoption is additive, not a replacement), and the Base Version's
-# bare, unnamespaced route names (ADR 0001 item 4) would otherwise collide with
-# those pre-existing same-named routes. Nothing else in this project ever
-# reverse()s a route by name, so only the two views that actually call reverse()
-# at request time — schema and docs — need distinct names to stay unambiguous.
 v1.register('docs/', SpectacularSwaggerView.as_view(url_name='v1-schema'), name='v1-docs')
 v1.register('healthz/', healthz, name='healthz')
 v1.register('integrations/webhooks', WebhookEndpointViewSet, basename='webhooks')

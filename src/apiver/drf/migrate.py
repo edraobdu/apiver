@@ -42,7 +42,7 @@ from typing import Any
 from django.conf import settings
 from django.urls import URLPattern, URLResolver
 from django.urls.resolvers import LocalePrefixPattern, RegexPattern
-from drf_spectacular.views import SpectacularAPIView
+from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 from rest_framework.routers import APIRootView
 
 from .version import Version
@@ -77,7 +77,7 @@ class RegistrationPlan:
     """One `register()` call migrate will emit."""
 
     key: str
-    kind: str  # "viewset" | "view" | "schema"
+    kind: str  # "viewset" | "view" | "schema" | "docs"
     module: str
     symbol: str
     basename: str | None = None
@@ -87,6 +87,13 @@ class RegistrationPlan:
     # unused for this kind: there is nothing to import, the handler is
     # `{var_name}.schema_view(prefix=...)` itself.
     schema_prefix: str | None = None
+    # Set only for kind == "docs" — the name of this version's own schema
+    # registration (see `schema_prefix` above), passed as `url_name=` to
+    # `.as_view()` (ADR 0001 item 4 / ticket 22 finding) so a Swagger/Redoc UI
+    # view resolves *this* version's schema link, not whichever same-named
+    # route Django's reverse() happens to pick when the pre-existing project's
+    # own, identically-named schema/docs routes are still live too.
+    schema_name: str | None = None
 
 
 @dataclass
@@ -295,7 +302,9 @@ def _derive_router_prefix(
     return None
 
 
-def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str) -> DiscoveryResult:
+def discover(
+    root_patterns: Any, *, prefix: str, schema_mount_prefix: str, base_name: str
+) -> DiscoveryResult:
     """Walk `root_patterns` (a URLconf's `urlpatterns` list), classify
     every in-scope route, and turn it into a plan for `Version.register()`.
 
@@ -308,11 +317,20 @@ def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str) -> Di
     exists, since that view scans the whole `ROOT_URLCONF` unscoped and
     would start leaking sibling versions' routes.
 
-    `SpectacularSwaggerView`/`SpectacularRedocView` need no equivalent
-    special-casing: they never scan the urlconf themselves, only
-    `reverse()` the schema route's own `url_name` at request time, so the
-    ordinary discovery-and-reimport path below already emits correct
-    wiring for them.
+    `SpectacularSwaggerView`/`SpectacularRedocView` *do* need special-casing,
+    despite never scanning the urlconf themselves: both `reverse()` the
+    schema route's own `url_name` at request time, and the Base Version
+    deliberately keeps bare, unnamespaced route names (ADR 0001 item 4) —
+    identical to whatever the pre-existing project already used. Adopting a
+    project that keeps its pre-apiver routes mounted alongside the new,
+    versioned ones (rather than retiring them) puts two different routes
+    behind the exact same name, and Django's `reverse()` for an unqualified
+    name silently picks one (ticket 22 finding). `base_name` is used to give
+    the discovered schema route a version-qualified name
+    (`f"{base_name}-schema"`, always, whether or not the original project
+    named it at all) and to point every discovered Swagger/Redoc view's
+    `url_name` at that same qualified name, rather than preserving
+    whatever bare name they were discovered with.
 
     Returns diagnostics for anything that could not be classified or
     regenerated rather than raising immediately — every offending route is
@@ -379,14 +397,24 @@ def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str) -> Di
             RegistrationPlan(key=key, kind="viewset", module=module, symbol=symbol, basename=basename)
         )
 
+    docs_view_classes = (SpectacularSwaggerView, SpectacularRedocView)
     schema_endpoints = []
+    docs_endpoints = []
     other_endpoints = []
     for endpoint in view_endpoints:
         if endpoint.cls is not None and issubclass(endpoint.cls, SpectacularAPIView):
             schema_endpoints.append(endpoint)
+        elif endpoint.cls is not None and issubclass(endpoint.cls, docs_view_classes):
+            docs_endpoints.append(endpoint)
         else:
             other_endpoints.append(endpoint)
     view_endpoints = other_endpoints
+
+    # Deterministic regardless of whether (or how) the pre-existing project
+    # named its own schema route — every discovered Swagger/Redoc view below
+    # points at exactly this name, and nothing else in the generated registry
+    # ever collides with it, since APIVER_BASE_VERSION is unique per project.
+    schema_name = f"{base_name}-schema"
 
     if len(schema_endpoints) > 1:
         diagnostics.append(
@@ -405,11 +433,6 @@ def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str) -> Di
                 "SpectacularAPIView (ticket #40). Register it by hand with "
                 "Version.schema_view(prefix=...)."
             )
-        elif endpoint.url_name is None:
-            diagnostics.append(
-                f"{endpoint.path!r} has no url `name=` — register() requires an explicit name= for "
-                "non-ViewSet handlers, since there is no router to derive one from (ADR 0002 item 3)."
-            )
         elif endpoint.is_regex_declared:
             diagnostics.append(
                 f"{endpoint.path!r} was declared with re_path(), not path() — apiver's register() "
@@ -425,10 +448,44 @@ def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str) -> Di
                     kind="schema",
                     module="",
                     symbol="",
-                    name=endpoint.url_name,
+                    name=schema_name,
                     schema_prefix=schema_mount_prefix,
                 )
             )
+
+    for endpoint in sorted(docs_endpoints, key=lambda e: e.path):
+        if endpoint.url_name is None:
+            diagnostics.append(
+                f"{endpoint.path!r} has no url `name=` — register() requires an explicit name= for "
+                "non-ViewSet handlers, since there is no router to derive one from (ADR 0002 item 3)."
+            )
+            continue
+        if endpoint.is_regex_declared:
+            diagnostics.append(
+                f"{endpoint.path!r} was declared with re_path(), not path() — apiver's register() "
+                "always re-emits explicit views as path() entries, which cannot express an arbitrary "
+                "regex (ticket 02 §3.5). Convert it to path() first, or register it by hand."
+            )
+            continue
+
+        resolved = _resolve_class_symbol(endpoint.cls, endpoint.callback, endpoint.path, diagnostics)
+        if resolved is None:
+            continue
+        module, symbol = resolved
+
+        key = _relative(prefix, endpoint.path)
+        # Qualified, not the bare discovered name: the same collision this
+        # function's docstring explains for the schema route itself applies
+        # here too — reused verbatim, "docs" would collide with the
+        # pre-existing project's own same-named route the moment both stay
+        # mounted (ticket 22 finding).
+        name = f"{base_name}-{endpoint.url_name}"
+        groups[key] = [endpoint]
+        plans.append(
+            RegistrationPlan(
+                key=key, kind="docs", module=module, symbol=symbol, name=name, schema_name=schema_name
+            )
+        )
 
     for endpoint in sorted(view_endpoints, key=lambda e: e.path):
         if endpoint.url_name is None:
@@ -540,6 +597,11 @@ def render_registry(plans: list[RegistrationPlan], *, base_name: str, var_name: 
         elif plan.kind == "schema":
             register_lines.append(
                 f"{var_name}.register({plan.key!r}, {var_name}.schema_view(prefix={plan.schema_prefix!r}), "
+                f"name={plan.name!r})"
+            )
+        elif plan.kind == "docs":
+            register_lines.append(
+                f"{var_name}.register({plan.key!r}, {plan.symbol}.as_view(url_name={plan.schema_name!r}), "
                 f"name={plan.name!r})"
             )
         else:
@@ -814,7 +876,9 @@ def write_registry(*, prefix: str | None) -> tuple[Path, Path]:
 
     mount_prefix = root_prefix + f"{base_name}/"
     root_urlconf = import_module(settings.ROOT_URLCONF)
-    result = discover(root_urlconf.urlpatterns, prefix=prefix, schema_mount_prefix=mount_prefix)
+    result = discover(
+        root_urlconf.urlpatterns, prefix=prefix, schema_mount_prefix=mount_prefix, base_name=base_name
+    )
     if result.diagnostics:
         raise MigrateError("\n".join(f"- {message}" for message in result.diagnostics))
     if not result.plans:

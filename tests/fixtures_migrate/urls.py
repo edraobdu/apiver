@@ -24,11 +24,11 @@ urlpatterns = [
     path("api/", include(widgets_router.urls)),
     path("api/", include(gadgets_router.urls)),
     path("api/integrations/webhooks/", include(webhooks_router.urls)),
-    # A pre-existing, unscoped drf-spectacular schema/docs pair (ticket
-    # #40) — proves migrate special-cases SpectacularAPIView into a
-    # `schema_view(prefix=...)` call instead of registering it raw, while
-    # SpectacularSwaggerView (no urlconf-scanning of its own) is migrated
-    # through the ordinary path unchanged.
+    # A pre-existing, unscoped drf-spectacular schema/docs pair (ticket #40,
+    # ticket 22) — proves migrate special-cases both SpectacularAPIView (into
+    # a `schema_view(prefix=...)` call instead of registering it raw) and
+    # SpectacularSwaggerView (into a version-qualified name and `url_name=`,
+    # instead of preserving the bare "schema"/"docs" names verbatim).
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
     # Outside --prefix "api/" — proves the prefix filter excludes it.
