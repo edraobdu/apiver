@@ -68,10 +68,10 @@ checks (layout, manifest freshness, max-live-versions) only register via `AppCon
 At the bottom of `config/settings.py`:
 
 ```python
-APIVER_ROOT_DIR = "api"          # dotted path to the package holding every version
-APIVER_ROOT_PREFIX = "api/"      # absolute URL path every version mounts under
-APIVER_BASE_VERSION = "v1"       # the name init adopts the existing API as
-APIVER_VERSIONS = ["v1"]         # hand-maintained list of Live version names
+APIVER_ROOT_DIR = "api"  # dotted path to the package holding every version
+APIVER_ROOT_PREFIX = "api/"  # absolute URL path every version mounts under
+APIVER_BASE_VERSION = "v1"  # the name init adopts the existing API as
+APIVER_VERSIONS = ["v1"]  # hand-maintained list of Live version names
 ```
 
 `reference/`'s whole pre-existing API already lives under `api/`, which is why no `--prefix`
@@ -113,20 +113,20 @@ wrote .../reference/apiver.toml
 the existing views exactly where they already lived:
 
 ```python
-v1 = Version('v1')
-v1.register('addresses', AddressViewSet, basename='addresses')
-v1.register('docs/', v1.docs_view(), name='v1-docs')
-v1.register('healthz/', healthz, name='healthz')
-v1.register('integrations/webhooks', WebhookEndpointViewSet, basename='webhooks')
-v1.register('legacy-invoices', LegacyInvoiceViewSet, basename='legacy-invoices')
-v1.register('notifications', NotificationViewSet, basename='notifications')
-v1.register('notifications/mark-all-read/', mark_all_read, name='notifications-mark-all-read')
-v1.register('orders', OrderViewSet, basename='orders')
-v1.register('orders/export/', OrdersExportView, name='orders-export')
-v1.register('payments', PaymentViewSet, basename='payments')
-v1.register('payments/summary/', PaymentsSummaryView, name='payments-summary')
-v1.register('users', UserViewSet, basename='users')
-v1.register('schema/', v1.schema_view(prefix='api/v1/'), name='v1-schema')
+v1 = Version("v1")
+v1.register("addresses", AddressViewSet, basename="addresses")
+v1.register("docs/", v1.docs_view(), name="v1-docs")
+v1.register("healthz/", healthz, name="healthz")
+v1.register("integrations/webhooks", WebhookEndpointViewSet, basename="webhooks")
+v1.register("legacy-invoices", LegacyInvoiceViewSet, basename="legacy-invoices")
+v1.register("notifications", NotificationViewSet, basename="notifications")
+v1.register("notifications/mark-all-read/", mark_all_read, name="notifications-mark-all-read")
+v1.register("orders", OrderViewSet, basename="orders")
+v1.register("orders/export/", OrdersExportView, name="orders-export")
+v1.register("payments", PaymentViewSet, basename="payments")
+v1.register("payments/summary/", PaymentsSummaryView, name="payments-summary")
+v1.register("users", UserViewSet, basename="users")
+v1.register("schema/", v1.schema_view(prefix="api/v1/"), name="v1-schema")
 ```
 
 `api/urls.py` — the Aggregation Root — mounts it:
@@ -135,7 +135,7 @@ v1.register('schema/', v1.schema_view(prefix='api/v1/'), name='v1-schema')
 from api.v1.registry import v1
 
 urlpatterns = [
-    path('api/v1/', include(v1.urls)),
+    path("api/v1/", include(v1.urls)),
 ]
 ```
 
@@ -202,9 +202,9 @@ silently fails to resolve. The generated `api/v2/registry.py` is deliberately mi
 ```python
 from api.v1.registry import v1
 
-v2 = v1.derive('v2')
-v2.override('schema/', v2.schema_view(prefix='api/v2/'), name='schema')
-v2.override('docs/', v2.docs_view(), name='docs')
+v2 = v1.derive("v2")
+v2.override("schema/", v2.schema_view(prefix="api/v2/"), name="schema")
+v2.override("docs/", v2.docs_view(), name="docs")
 ```
 
 Both use `override()` because `init` already wired `schema/`/`docs/` on v1 — `mount` uses
@@ -432,22 +432,22 @@ Everything else (`addresses`, `notifications`, `healthz`) is inherited from v1 u
 hand against a migrated dev database:
 
 ```pycon
->>> c.get('/api/v2/users/').json()['results'][0]
+>>> c.get("/api/v2/users/").json()["results"][0]
 {'id': 1, 'username': 'ada', 'email': 'ada@example.com', 'display_name': 'Ada Lovelace', 'is_active': True}
->>> c.get('/api/v2/orders/').json()['results'][0]
+>>> c.get("/api/v2/orders/").json()["results"][0]
 {'id': 1, 'reference': 'ORD-1'}                          # no 'status'
->>> c.get('/api/v2/payments/').json()['results'][0]
+>>> c.get("/api/v2/payments/").json()["results"][0]
 {'id': 1, 'amount': 1050, 'currency': 'USD', 'status': 'pending',
  'card': {'last4': '4242', 'brand': 'visa'}, 'display_amount': '$10.50', 'created_at': '...'}
->>> c.get('/api/v2/legacy-invoices/').status_code
+>>> c.get("/api/v2/legacy-invoices/").status_code
 404
->>> c.get('/api/v2/integrations/webhooks/').status_code
+>>> c.get("/api/v2/integrations/webhooks/").status_code
 404
->>> c.get('/api/v2/webhooks/').status_code
+>>> c.get("/api/v2/webhooks/").status_code
 200
->>> c.post('/api/v2/payments/1/refund/').status_code
+>>> c.post("/api/v2/payments/1/refund/").status_code
 404
->>> c.get('/api/v1/users/').json()['results'][0]          # v1 unaffected throughout
+>>> c.get("/api/v1/users/").json()["results"][0]  # v1 unaffected throughout
 {'id': 1, 'username': 'ada', 'email': 'ada@example.com', 'full_name': 'Ada Lovelace', 'is_active': True}
 ```
 
