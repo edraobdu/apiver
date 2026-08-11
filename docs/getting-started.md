@@ -66,15 +66,15 @@ explicitly which pre-existing routes count as in scope for adoption.
 
 ## 3. Run `apiver migrate`
 
-`apiver` is a standalone CLI, not a `manage.py` subcommand, so it needs both Django settings and the
-project root on `PYTHONPATH` set explicitly (`manage.py` does the first for you automatically; nothing
-does the second for the bare `apiver` entry point). Django settings can come from the env var, a
-top-level `--settings` flag, or `[tool.apiver].django_settings_module` in `./pyproject.toml` — checked
-in that order:
+`apiver` is a standalone CLI, not a `manage.py` subcommand, so it needs Django settings resolved one
+way or another before it can run. Run it from the project root (same as `manage.py`) and `apiver`
+puts that directory on `sys.path` itself, so nothing extra is needed there. Django settings can come
+from the env var, a top-level `--settings` flag, or `[tool.apiver].django_settings_module` in
+`./pyproject.toml` — checked in that order:
 
 ```console
-$ DJANGO_SETTINGS_MODULE=config.settings PYTHONPATH=. apiver migrate
-$ PYTHONPATH=. apiver --settings config.settings migrate
+$ DJANGO_SETTINGS_MODULE=config.settings apiver migrate
+$ apiver --settings config.settings migrate
 ```
 
 This walks the *live, resolved* `ROOT_URLCONF` under `APIVER_ROOT_PREFIX` (or `--prefix`, if
