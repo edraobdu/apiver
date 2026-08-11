@@ -1,12 +1,15 @@
-"""apiver's command-line entry point (tickets 16-17, 43).
+"""apiver's command-line entry point (tickets 16-17, 43, 54).
 
 A standalone script, not a `manage.py` subcommand, so offline tooling can
 introspect a project without importing the whole thing (spec item 66).
 `manifest`, `migrate`, `mount`, and `alias` still need
-`DJANGO_SETTINGS_MODULE` set, exactly as any other Django-adjacent CLI
+`DJANGO_SETTINGS_MODULE` resolved, exactly as any other Django-adjacent CLI
 (celery, gunicorn) requires, since they build from live `Version`/`Alias`
-objects that only exist once Django settings are configured. `versions` is
-the exception: it reads only the
+objects that only exist once Django settings are configured. Ticket #54
+adds two alternatives to exporting the env var yourself, mirroring
+pytest-django's own `--ds` precedence: a top-level `--settings` flag, then
+the env var, then `[tool.apiver].django_settings_module` in
+`./pyproject.toml`. `versions` is the exception: it reads only the
 already-written `apiver.toml` off disk, so it needs neither Django settings
 nor an importable project — its imports are therefore kept out of this
 module's top level and loaded inside its own command function, so merely
@@ -17,9 +20,31 @@ drf-spectacular, and those read Django settings at import time).
 import argparse
 import os
 import sys
+import tomllib
 from pathlib import Path
 
 from .versions_report import MANIFEST_FILENAME, format_versions_report, load_committed_manifest
+
+
+def _resolve_django_settings_module(settings_flag: str | None) -> str | None:
+    """flag -> env var -> `[tool.apiver].django_settings_module` in
+    `./pyproject.toml` (ticket #54), mirroring pytest-django's own `--ds`
+    precedence. `pyproject.toml` is resolved relative to the current
+    working directory only, matching how `apiver.toml`/`manifest_path` are
+    already resolved — no upward directory search."""
+    if settings_flag:
+        return settings_flag
+
+    env_value = os.environ.get("DJANGO_SETTINGS_MODULE")
+    if env_value:
+        return env_value
+
+    pyproject_path = Path.cwd() / "pyproject.toml"
+    if not pyproject_path.is_file():
+        return None
+    data = tomllib.loads(pyproject_path.read_text())
+    value = data.get("tool", {}).get("apiver", {}).get("django_settings_module")
+    return value if isinstance(value, str) else None
 
 
 def _cmd_migrate(*, prefix: str | None, manifest_path: str | None) -> int:
@@ -123,6 +148,12 @@ def _cmd_versions(*, path: str | None) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="apiver")
+    parser.add_argument(
+        "--settings",
+        default=None,
+        help="DJANGO_SETTINGS_MODULE to use, pytest-django `--ds`-style — takes precedence over the "
+        "env var and pyproject.toml's [tool.apiver].django_settings_module. Unused by `versions`.",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     manifest_parser = subparsers.add_parser(
@@ -212,9 +243,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "versions":
         return _cmd_versions(path=args.path)
 
-    if not os.environ.get("DJANGO_SETTINGS_MODULE"):
+    resolved_settings = _resolve_django_settings_module(args.settings)
+    if not resolved_settings:
         print("apiver: DJANGO_SETTINGS_MODULE is not set.", file=sys.stderr)
         return 1
+    os.environ["DJANGO_SETTINGS_MODULE"] = resolved_settings
 
     import django
 
