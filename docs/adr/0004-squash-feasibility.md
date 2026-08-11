@@ -107,3 +107,26 @@ Squash's build ticket (post-0.1, deferred fog) inherits a concrete technique lis
 resynthesize / manual-review) and an explicit novelty warning rather than an open-ended "figure out
 LibCST" task. The `Live`/`Archived` distinction is now part of the domain model (`CONTEXT.md`) and will
 need to be read by ticket 12's gating semantics work, since Sunset Versions stay Live by this definition.
+
+**Amendment (ticket #41): item 8 stands as written — no exemption for Deprecated or Sunset Versions.**
+Grilled while working #39: whether `APIVER_MAX_LIVE_VERSIONS` should free a slot once a Version is
+Deprecated, or once it's past Sunset and answering 410, came up as a live alternative reading of the
+guardrail. Two facts settle it against exemption in either form:
+
+- **Sunset doesn't reduce the cost being counted.** `Version.urls` always calls `self._build()` and walks
+  the full parent chain regardless of deprecated/sunset state — the sunset gate only short-circuits the
+  per-request view with a 410, it doesn't skip import/instantiation. A Sunset Version carries the
+  identical chain-build cost as a fully-Live one, so exempting it at Sunset would exempt it from a count
+  that's still fully justified by the cost item 8 is pricing.
+- **Deprecation doesn't stop the chain from growing.** `deprecate()` is independent of `freeze()` — a
+  Version can be Deprecated and still accept `register()`/`override()`/`remove()` calls. Exempting at
+  Deprecation would open exactly the hole item 8 exists to close: a developer could deprecate a version
+  and keep piling deltas onto it indefinitely with zero guardrail pressure, the endless-chain scenario
+  happening invisibly.
+
+The only reading of "exempt" that isn't gameable is "exempt once Frozen" — but a Frozen, still-mounted
+Version pays the identical build cost, so that's the "Counting Frozen Versions instead of mounted ones"
+option already rejected above, just approached from the other direction. No state short of Archived
+actually reduces the guardrail's cost basis. Closed as won't-fix: `APIVER_MAX_LIVE_VERSIONS` counts every
+mounted Version regardless of lifecycle state, and squash / rebase-and-archive (item 5) remain the only
+ways to free a slot.

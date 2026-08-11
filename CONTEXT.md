@@ -118,7 +118,8 @@ _Avoid_: merge, collapse
 
 **Deprecation**:
 The state of a Version that still serves but signals it will eventually Sunset. Declared on the Version
-itself; the Manifest reflects it but never originates it.
+itself; the Manifest reflects it but never originates it. Independent of Frozen — a Deprecated Version
+remains mutable and still counts as Live (ADR 0004 item 8 amendment) until separately Frozen and Archived.
 _Avoid_: sunset (a stricter, later state)
 
 **Sunset**:
