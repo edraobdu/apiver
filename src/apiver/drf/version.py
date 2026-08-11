@@ -8,7 +8,7 @@ from django.http import JsonResponse
 from django.urls import URLPattern, include, path
 from django.utils import timezone
 from django.utils.http import http_date
-from drf_spectacular.views import SpectacularAPIView
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework.routers import BaseRouter, SimpleRouter
 from rest_framework.viewsets import ViewSetMixin
 
@@ -475,6 +475,29 @@ class Version:
         app_name = self.name if self.parent is not None else None
         return patterns, app_name
 
+    @property
+    def schema_route_name(self) -> str:
+        """The `name=` this Version's own `schema_view()` registration
+        should always use — the single source of that convention:
+        `apiver migrate` derives a discovered schema route's name from it,
+        and `docs_view()` below reverses it by name, rather than either
+        duplicating the string format independently (ticket 22 finding: the
+        two drifting out of sync is exactly how a Swagger/Redoc UI silently
+        ends up pointing at the wrong version's schema).
+
+        The Base Version has no Django instance namespace of its own (ADR
+        0001 item 4) — a bare "schema" name would collide with a
+        pre-existing, identically-named route kept mounted alongside it
+        (ticket 22 finding), so it needs its own explicitly qualified name,
+        `f"{name}-schema"`. An authored Version already gets an instance
+        namespace for free (ADR 0002 item 7, `app_name=self.name` on
+        `Version.urls`) — Django prefixes *any* name registered inside it
+        with `f"{name}:"` automatically, so qualifying the registration name
+        itself would only double up (`f"{name}:{name}-schema"`); it stays
+        registered under the plain "schema" every version already used.
+        """
+        return f"{self.name}-schema" if self.parent is None else "schema"
+
     def schema_view(
         self,
         *,
@@ -528,6 +551,35 @@ class Version:
         self._schema_view_cache = SpectacularAPIView.as_view(patterns=mount, custom_settings=custom_settings)
         return self._schema_view_cache
 
+    def docs_view(self, *, view_class: type = SpectacularSwaggerView):
+        """A Swagger/Redoc-style UI view pointed at this Version's own schema
+        route — the same call shape as `schema_view()` (called on the
+        `Version`, not built ad hoc at the call site), even though there's
+        no scoping problem to solve here: neither `SpectacularSwaggerView`
+        nor `SpectacularRedocView` scans the urlconf themselves, they only
+        `reverse()` a schema route's name at request time (ticket 22).
+
+        Resolves `schema_route_name` into the actual string `reverse()`
+        needs, which is *not* always the same string schema_view()'s own
+        registration used: an authored Version's instance namespace means
+        anything reversing its schema route from outside that namespace —
+        including this view, since a UI page isn't itself inside the
+        namespace at request-resolution time — needs the qualified
+        `f"{self.name}:{schema_route_name}"` form, not the bare local name
+        the registration itself was given.
+
+        Not cached, unlike `schema_view()` — a schema document is singular
+        per Version by design (ADR 0002 Consequences), but a UI in front of
+        it isn't: a project can mount both a Swagger view and a Redoc view
+        against the identical schema, each its own registration, so caching
+        a single result here would silently return the wrong one on a
+        second call with a different `view_class`.
+        """
+        reverse_name = self.schema_route_name
+        if self.parent is not None:
+            reverse_name = f"{self.name}:{reverse_name}"
+        return view_class.as_view(url_name=reverse_name)
+
 
 class Alias:
     """A movable name that resolves through a target Version's exact mounts.
@@ -542,10 +594,10 @@ class Alias:
     Python import time before `Alias` ever runs — there is no request-time
     "alias points nowhere" case to gate here.
 
-    `schema_view()` is a plain proxy to the target's own cached
-    `schema_view()` (see that method's docstring) — promoting the alias to a
-    new target only ever means editing `target=` here; nothing at the
-    alias's own mount site has to change.
+    `schema_view()`/`docs_view()` are plain proxies to the target's own
+    (see those methods' docstrings) — promoting the alias to a new target
+    only ever means editing `target=` here; nothing at the alias's own
+    mount site has to change.
     """
 
     def __init__(self, name: str, *, target: Version):
@@ -554,6 +606,9 @@ class Alias:
 
     def schema_view(self):
         return self.target.schema_view()
+
+    def docs_view(self, *, view_class: type = SpectacularSwaggerView):
+        return self.target.docs_view(view_class=view_class)
 
     @property
     def urls(self):

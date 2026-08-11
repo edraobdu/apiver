@@ -31,4 +31,15 @@ DATABASES = {
     }
 }
 
+# Required for SpectacularSwaggerView/docs_view() to actually render (ticket
+# 22) — without it, drf-spectacular's bundled swagger_ui.html template is
+# never discoverable and any real HTTP GET against a docs route 500s.
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "APP_DIRS": True,
+        "OPTIONS": {},
+    }
+]
+
 ROOT_URLCONF = "tests.testapp.urls"

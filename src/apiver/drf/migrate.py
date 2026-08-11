@@ -87,13 +87,6 @@ class RegistrationPlan:
     # unused for this kind: there is nothing to import, the handler is
     # `{var_name}.schema_view(prefix=...)` itself.
     schema_prefix: str | None = None
-    # Set only for kind == "docs" — the name of this version's own schema
-    # registration (see `schema_prefix` above), passed as `url_name=` to
-    # `.as_view()` (ADR 0001 item 4 / ticket 22 finding) so a Swagger/Redoc UI
-    # view resolves *this* version's schema link, not whichever same-named
-    # route Django's reverse() happens to pick when the pre-existing project's
-    # own, identically-named schema/docs routes are still live too.
-    schema_name: str | None = None
 
 
 @dataclass
@@ -414,7 +407,10 @@ def discover(
     # named its own schema route — every discovered Swagger/Redoc view below
     # points at exactly this name, and nothing else in the generated registry
     # ever collides with it, since APIVER_BASE_VERSION is unique per project.
-    schema_name = f"{base_name}-schema"
+    # `Version.schema_route_name` is the single source of this convention
+    # (ticket 22) — computed off a throwaway Version instance rather than
+    # duplicating the string format here.
+    schema_name = Version(base_name).schema_route_name
 
     if len(schema_endpoints) > 1:
         diagnostics.append(
@@ -481,11 +477,7 @@ def discover(
         # mounted (ticket 22 finding).
         name = f"{base_name}-{endpoint.url_name}"
         groups[key] = [endpoint]
-        plans.append(
-            RegistrationPlan(
-                key=key, kind="docs", module=module, symbol=symbol, name=name, schema_name=schema_name
-            )
-        )
+        plans.append(RegistrationPlan(key=key, kind="docs", module=module, symbol=symbol, name=name))
 
     for endpoint in sorted(view_endpoints, key=lambda e: e.path):
         if endpoint.url_name is None:
@@ -544,6 +536,9 @@ def verify(result: DiscoveryResult, *, base_name: str) -> list[str]:
         for plan in result.plans:
             if plan.kind == "schema":
                 handler = version.schema_view(prefix=plan.schema_prefix)
+            elif plan.kind == "docs":
+                module = import_module(plan.module)
+                handler = version.docs_view(view_class=getattr(module, plan.symbol))
             else:
                 module = import_module(plan.module)
                 handler = getattr(module, plan.symbol)
@@ -572,6 +567,17 @@ def verify(result: DiscoveryResult, *, base_name: str) -> list[str]:
     return diagnostics
 
 
+def _is_default_docs_view(plan: RegistrationPlan) -> bool:
+    """True for a discovered `SpectacularSwaggerView`, unmodified — exactly the
+    default `docs_view()` already falls back to, so passing `view_class=`
+    explicitly would just repeat what's already true (ticket 22 finding)."""
+    return (
+        plan.kind == "docs"
+        and plan.module == "drf_spectacular.views"
+        and plan.symbol == "SpectacularSwaggerView"
+    )
+
+
 def render_registry(plans: list[RegistrationPlan], *, base_name: str, var_name: str) -> str:
     """Render `registry.py`'s source text. Deterministic: plans are
     processed in the sorted-by-key order `discover()` already returns them
@@ -580,8 +586,11 @@ def render_registry(plans: list[RegistrationPlan], *, base_name: str, var_name: 
     """
     imports: dict[str, list[str]] = {}
     for plan in plans:
-        if plan.kind != "schema":  # no import needed — the handler is {var_name}.schema_view(...)
-            imports.setdefault(plan.module, []).append(plan.symbol)
+        if plan.kind == "schema":
+            continue  # no import needed — the handler is {var_name}.schema_view(...)
+        if plan.kind == "docs" and _is_default_docs_view(plan):
+            continue  # no import needed — SpectacularSwaggerView is docs_view()'s own default
+        imports.setdefault(plan.module, []).append(plan.symbol)
 
     import_lines = [
         f"from {module} import {', '.join(sorted(set(symbols)))}"
@@ -600,10 +609,12 @@ def render_registry(plans: list[RegistrationPlan], *, base_name: str, var_name: 
                 f"name={plan.name!r})"
             )
         elif plan.kind == "docs":
-            register_lines.append(
-                f"{var_name}.register({plan.key!r}, {plan.symbol}.as_view(url_name={plan.schema_name!r}), "
-                f"name={plan.name!r})"
+            docs_view_call = (
+                f"{var_name}.docs_view()"
+                if _is_default_docs_view(plan)
+                else f"{var_name}.docs_view(view_class={plan.symbol})"
             )
+            register_lines.append(f"{var_name}.register({plan.key!r}, {docs_view_call}, name={plan.name!r})")
         else:
             register_lines.append(f"{var_name}.register({plan.key!r}, {plan.symbol}, name={plan.name!r})")
 
