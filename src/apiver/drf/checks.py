@@ -37,7 +37,7 @@ from pathlib import Path
 from django.conf import settings
 from django.core.checks import Error, Warning, register
 
-from .manifest import ManifestError, _load_versions, manifest_diff
+from .manifest import ManifestError, _load_aliases, _load_versions, manifest_diff
 
 AUTHORED_REQUIRED_FILES = ("serializers.py", "views.py", "registry.py")
 BASE_REQUIRED_FILES = ("registry.py",)
@@ -168,6 +168,26 @@ def check_manifest_freshness(app_configs=None, **kwargs) -> list[Error | Warning
                 id="apiver.W001",
             )
         ]
+    return []
+
+
+@register()
+def check_alias_registration(app_configs=None, **kwargs) -> list[Error]:
+    """For each `APIVER_ALIASES` entry, verifies the derived path
+    (`f"{APIVER_ROOT_DIR}.urls.{name}"`) imports and is an `Alias` instance
+    — the same guarantee `check_version_layout` already gives a
+    misconfigured `APIVER_VERSIONS` entry (ticket #53).
+
+    A no-op when `APIVER_ALIASES` isn't configured — an alias is optional,
+    default `[]` (ADR 0007's second amendment).
+    """
+    if not getattr(settings, "APIVER_ALIASES", None):
+        return []
+
+    try:
+        _load_aliases()
+    except ManifestError as exc:
+        return [Error(f"apiver could not resolve APIVER_ALIASES: {exc}", id="apiver.E008")]
     return []
 
 

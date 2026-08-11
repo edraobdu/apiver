@@ -4,8 +4,14 @@ from django.core.checks import Error, Warning
 from django.core.checks.registry import registry
 from django.test import override_settings
 
-from apiver.drf import ManifestError, build_manifest, check_manifest_freshness, check_max_live_versions
-from apiver.drf.manifest import load_committed_manifest, manifest_diff, manifest_path
+from apiver.drf import (
+    ManifestError,
+    build_manifest,
+    check_alias_registration,
+    check_manifest_freshness,
+    check_max_live_versions,
+)
+from apiver.drf.manifest import _load_aliases, load_committed_manifest, manifest_diff, manifest_path
 from tests.fixtures_manifest.api.urls import stable
 from tests.fixtures_manifest.api.v1.registry import v1
 from tests.fixtures_manifest.api.v2.registry import FIXED_SUNSET, v2
@@ -16,7 +22,7 @@ ROOT_DIR = "tests.fixtures_manifest.api"
 @override_settings(
     APIVER_ROOT_DIR=ROOT_DIR,
     APIVER_VERSIONS=["v1", "v2"],
-    APIVER_ALIASES={"stable": "tests.fixtures_manifest.api.urls.stable"},
+    APIVER_ALIASES=["stable"],
 )
 def test_build_manifest_mirrors_the_live_resolution_tables():
     manifest = build_manifest()
@@ -75,6 +81,31 @@ def test_a_version_name_that_fails_to_import_raises_a_manifest_error():
 
 @override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["notaversion"])
 def test_a_version_name_pointing_at_a_non_version_raises_a_manifest_error():
+    with pytest.raises(ManifestError):
+        build_manifest()
+
+
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["v1", "v2"], APIVER_ALIASES=[])
+def test_no_configured_aliases_is_fine_aliases_are_optional():
+    manifest = build_manifest()
+
+    assert manifest["aliases"] == {}
+
+
+@override_settings(APIVER_ROOT_DIR=None, APIVER_ALIASES=["stable"])
+def test_aliases_configured_without_a_root_dir_raises_a_manifest_error():
+    with pytest.raises(ManifestError):
+        _load_aliases()
+
+
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["v1", "v2"], APIVER_ALIASES=["does_not_exist"])
+def test_an_alias_name_that_fails_to_import_raises_a_manifest_error():
+    with pytest.raises(ManifestError):
+        build_manifest()
+
+
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["v1", "v2"], APIVER_ALIASES=["v1"])
+def test_an_alias_name_pointing_at_a_non_alias_raises_a_manifest_error():
     with pytest.raises(ManifestError):
         build_manifest()
 
@@ -207,3 +238,35 @@ def test_check_max_live_versions_reports_a_configuration_error_loudly():
 
 def test_max_live_versions_check_is_registered_with_djangos_check_framework():
     assert check_max_live_versions in registry.registered_checks
+
+
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_ALIASES=[])
+def test_check_alias_registration_is_a_noop_without_apiver_aliases_configured():
+    assert check_alias_registration() == []
+
+
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_ALIASES=["stable"])
+def test_check_alias_registration_is_silent_when_every_alias_resolves():
+    assert check_alias_registration() == []
+
+
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_ALIASES=["does_not_exist"])
+def test_check_alias_registration_reports_a_configuration_error_loudly():
+    messages = check_alias_registration()
+
+    assert len(messages) == 1
+    assert isinstance(messages[0], Error)
+    assert messages[0].id == "apiver.E008"
+
+
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_ALIASES=["v1"])
+def test_check_alias_registration_reports_a_non_alias_target_loudly():
+    messages = check_alias_registration()
+
+    assert len(messages) == 1
+    assert isinstance(messages[0], Error)
+    assert messages[0].id == "apiver.E008"
+
+
+def test_the_alias_registration_check_is_registered_with_djangos_check_framework():
+    assert check_alias_registration in registry.registered_checks

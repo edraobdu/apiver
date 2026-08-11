@@ -35,6 +35,4 @@ ROOT_URLCONF = "tests.fixtures_manifest.api.urls"
 
 APIVER_ROOT_DIR = "tests.fixtures_manifest.api"
 APIVER_VERSIONS = ["v1", "v2"]
-APIVER_ALIASES = {
-    "stable": "tests.fixtures_manifest.api.urls.stable",
-}
+APIVER_ALIASES = ["stable"]

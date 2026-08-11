@@ -9,9 +9,11 @@ tickets 17-18), so a project points at its own objects explicitly:
   "v2"]`. Each name's `Version` instance is derived as
   `f"{APIVER_ROOT_DIR}.{name}.registry.{name}"` (ADR 0007 items 3-5) —
   typed once, as a name, not twice as a path.
-- `APIVER_ALIASES`: `{alias_name: "dotted.path.to.Alias instance"}`,
-  optional, default `{}`. Unaffected by ADR 0007 — an alias has no fixed
-  home the way a version's package does.
+- `APIVER_ALIASES`: a plain list of alias names, e.g. `["stable"]`,
+  optional, default `[]`. Each name's `Alias` instance is derived as
+  `f"{APIVER_ROOT_DIR}.urls.{name}"` (ADR 0007's second amendment) — an
+  alias's conventional home is the Aggregation Root itself, mirroring how
+  `APIVER_VERSIONS` derives its own path.
 
 The manifest mirrors the in-memory resolution table one-to-one (ADR 0003
 item 6): per version, parent/frozen/deprecated/sunset plus
@@ -86,12 +88,26 @@ def _load_versions() -> dict[str, Version]:
 
 
 def _load_aliases() -> dict[str, Alias]:
-    configured: dict[str, str] = getattr(settings, "APIVER_ALIASES", {})
+    names: list[str] = getattr(settings, "APIVER_ALIASES", [])
+    if not names:
+        return {}
+
+    root_dir: str | None = getattr(settings, "APIVER_ROOT_DIR", None)
+    if not root_dir:
+        raise ManifestError(
+            "apiver needs APIVER_ROOT_DIR set to derive each APIVER_ALIASES name's dotted path as "
+            "f'{APIVER_ROOT_DIR}.urls.{name}' — without it, there is no live Alias object to read "
+            "(ADR 0007's second amendment)."
+        )
+
     aliases: dict[str, Alias] = {}
-    for name, dotted_path in configured.items():
+    for name in names:
+        dotted_path = f"{root_dir}.urls.{name}"
         obj = _import_object(dotted_path)
         if not isinstance(obj, Alias):
-            raise ManifestError(f"APIVER_ALIASES[{name!r}] = {dotted_path!r} is not an Alias instance.")
+            raise ManifestError(
+                f"{dotted_path!r} (derived from APIVER_ALIASES[{name!r}]) is not an Alias instance."
+            )
         aliases[name] = obj
     return aliases
 

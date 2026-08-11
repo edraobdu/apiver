@@ -36,3 +36,6 @@ DATABASES = {
 
 APIVER_ROOT_DIR = "tests.fixtures_mount.api"
 APIVER_ROOT_PREFIX = "api/"
+# Named to prove `apiver alias` refuses a `--from` naming another alias
+# (ticket #53) — never imported, so it needs no backing object.
+APIVER_ALIASES = ["already_alias"]

@@ -2,10 +2,11 @@
 
 A standalone script, not a `manage.py` subcommand, so offline tooling can
 introspect a project without importing the whole thing (spec item 66).
-`manifest`, `migrate`, and `mount` still need `DJANGO_SETTINGS_MODULE` set,
-exactly as any other Django-adjacent CLI (celery, gunicorn) requires, since
-they build from live `Version`/`Alias` objects that only exist once Django
-settings are configured. `versions` is the exception: it reads only the
+`manifest`, `migrate`, `mount`, and `alias` still need
+`DJANGO_SETTINGS_MODULE` set, exactly as any other Django-adjacent CLI
+(celery, gunicorn) requires, since they build from live `Version`/`Alias`
+objects that only exist once Django settings are configured. `versions` is
+the exception: it reads only the
 already-written `apiver.toml` off disk, so it needs neither Django settings
 nor an importable project — its imports are therefore kept out of this
 module's top level and loaded inside its own command function, so merely
@@ -55,6 +56,22 @@ def _cmd_mount(*, version_name: str, from_version: str) -> int:
     # against — the new version isn't live yet, so a forgotten settings
     # edit fails silently at request time rather than here.
     print(f"apiver: add {version_name!r} to APIVER_VERSIONS to make it live.")
+    return 0
+
+
+def _cmd_alias(*, name: str, from_version: str) -> int:
+    from .drf.migrate import MigrateError, write_alias
+
+    try:
+        aggregation_path = write_alias(name, from_version=from_version)
+    except MigrateError as exc:
+        print(f"apiver: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"wrote {aggregation_path}")
+    # Same posture as mount: nothing to check this against yet — the alias
+    # isn't live until a developer adds it to APIVER_ALIASES by hand.
+    print(f"apiver: add {name!r} to APIVER_ALIASES to make it live.")
     return 0
 
 
@@ -160,6 +177,23 @@ def main(argv: list[str] | None = None) -> int:
         "exist at <APIVER_ROOT_DIR>.<from>.registry.",
     )
 
+    alias_parser = subparsers.add_parser(
+        "alias",
+        help="Declare a new Alias pointing at an already-mounted version, appended straight into the "
+        "Aggregation Root — its conventional home. No registry.py, no schema/docs wiring of its own.",
+    )
+    alias_parser.add_argument(
+        "name",
+        help="The alias's name (e.g. stable) — becomes the module-level variable name appended to "
+        "<APIVER_ROOT_DIR>/urls.py; refuses if it collides with anything already mounted there.",
+    )
+    alias_parser.add_argument(
+        "--from",
+        dest="from_version",
+        required=True,
+        help="The version to point the alias at (e.g. v2) — must already be mounted in the Aggregation Root.",
+    )
+
     versions_parser = subparsers.add_parser(
         "versions",
         help="Print lineage, frozen status, lifecycle state, alias pointers and route composition "
@@ -192,6 +226,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_migrate(prefix=args.prefix, manifest_path=args.manifest_path)
     if args.command == "mount":
         return _cmd_mount(version_name=args.version, from_version=args.from_version)
+    if args.command == "alias":
+        return _cmd_alias(name=args.name, from_version=args.from_version)
 
     parser.error(f"unknown command {args.command!r}")
     return 2

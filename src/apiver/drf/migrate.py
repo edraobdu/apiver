@@ -7,7 +7,10 @@ schema and docs routes always wired — then appends its `include()` to
 that same Aggregation Root (ticket #47). A developer never hand-writes a
 version into existence; `mount` is what creates it, and everything past
 that (its actual changed endpoints) is a hand-edit to the file `mount`
-just created.
+just created. `apiver alias` (`write_alias`) also shares this module: it
+declares a new `Alias` pointing at an already-mounted Version straight in
+the Aggregation Root — its conventional home — with no separate
+`registry.py` of its own (ticket #53, ADR 0007's second amendment).
 
 Generates wiring only — it never moves a file. The existing
 `serializers.py`/`views.py` stay wherever the pre-existing project already
@@ -709,11 +712,16 @@ def render_aggregation_root(mounts: list[tuple[str, str]], *, root_dir: str) -> 
     return "\n".join(lines)
 
 
-def _already_mounted(version_name: str, *, root_dir: str) -> bool:
+def _already_mounted(name: str, *, root_dir: str) -> bool:
+    """True if `name` is already mounted in the Aggregation Root — either
+    as a Version's `include(<name>.urls)` or an Alias's bare `<name>.urls`
+    (ticket #53). Both share one prefix namespace under the Aggregation
+    Root, so a single check catches a collision either way round.
+    """
     aggregation_path = _resolve_target_dir(root_dir) / "urls.py"
     if not aggregation_path.is_file():
         return False
-    return re.search(rf"include\({re.escape(version_name)}\.urls\)", aggregation_path.read_text()) is not None
+    return re.search(rf"\b{re.escape(name)}\.urls\b", aggregation_path.read_text()) is not None
 
 
 def _write_or_extend_aggregation_root(version_name: str, *, root_dir: str, mount_prefix: str) -> Path:
@@ -1005,3 +1013,137 @@ def write_registry(*, prefix: str | None) -> tuple[Path, Path]:
         base_name, root_dir=root_dir, mount_prefix=mount_prefix
     )
     return registry_path, aggregation_path
+
+
+def _extend_aggregation_root_with_alias(
+    name: str, from_version: str, *, root_dir: str, alias_prefix: str
+) -> Path:
+    """Append a new `Alias` declaration and its mount to an already-existing
+    Aggregation Root (ticket #53, ADR 0007's second amendment): `from
+    apiver.drf import Alias` (once, if not already imported), `<name> =
+    Alias(<name>, target=<from_version>)`, and `path(<alias_prefix>,
+    <name>.urls)` — no `include()` wrapper, since `Alias.urls` already
+    returns one (`version.py`'s `Alias.urls`).
+
+    `write_alias` never calls this against a file that doesn't exist yet:
+    aliasing an unmounted `from_version` is refused before this runs, so by
+    the time it does, the Aggregation Root already exists in the shape
+    `_write_or_extend_aggregation_root` itself generates. Refuses loudly,
+    writing nothing, if that shape has drifted — the same posture
+    `_write_or_extend_aggregation_root` already takes.
+    """
+    aggregation_path = _resolve_target_dir(root_dir) / "urls.py"
+    source = aggregation_path.read_text()
+    lines = source.splitlines()
+
+    import_indices = [i for i, line in enumerate(lines) if line.startswith(("from ", "import "))]
+    if not import_indices:
+        raise MigrateError(
+            f"{aggregation_path} has no import statements to extend — has it been hand-edited into "
+            "an unrecognized shape?"
+        )
+    if not re.search(r"from apiver\.drf import .*\bAlias\b", source):
+        lines.insert(import_indices[-1] + 1, "from apiver.drf import Alias")
+
+    try:
+        open_idx = next(i for i, line in enumerate(lines) if line.strip() == "urlpatterns = [")
+    except StopIteration:
+        raise MigrateError(
+            f"{aggregation_path} has no `urlpatterns = [` list — has it been hand-edited into an "
+            "unrecognized shape?"
+        ) from None
+    lines[open_idx:open_idx] = [f"{name} = Alias({name!r}, target={from_version})", ""]
+    open_idx += 2
+
+    try:
+        close_idx = next(i for i in range(open_idx + 1, len(lines)) if lines[i].strip() == "]")
+    except StopIteration:
+        raise MigrateError(
+            f"{aggregation_path}'s urlpatterns list has no closing `]` — has it been hand-edited "
+            "into an unrecognized shape?"
+        ) from None
+    lines.insert(close_idx, f"    path({alias_prefix!r}, {name}.urls),")
+
+    aggregation_path.write_text("\n".join(lines) + "\n")
+    return aggregation_path
+
+
+def write_alias(name: str, *, from_version: str) -> Path:
+    """`apiver alias`'s full flow (ticket #53, resolving ADR 0007's second
+    amendment): declare a new `Alias` pointing at an already-mounted
+    Version, appended straight into the Aggregation Root — an Alias's
+    conventional home is the Aggregation Root itself, the same place
+    `stable = Alias(...)` already tends to live in practice. No separate
+    `registry.py`, no schema/docs wiring of its own: `Alias.urls` already
+    re-includes whatever the target Version registered under those keys
+    (ADR 0002 items 22-23).
+
+    Refuses if `from_version` names another alias (rather than a Version),
+    isn't mounted yet, or if `name` collides with anything already mounted
+    under the Aggregation Root's shared prefix namespace — writing nothing
+    in every refusal case.
+
+    Never touches `settings.py` — adding `name` to APIVER_ALIASES stays a
+    hand-edit, the same posture `write_mount` already takes for
+    APIVER_VERSIONS.
+
+    Returns the Aggregation Root's path.
+    """
+    if not name.isidentifier():
+        raise MigrateError(
+            f"{name!r} is not a valid Python identifier — it becomes the module-level variable name "
+            "appended to the Aggregation Root."
+        )
+    if not from_version.isidentifier():
+        raise MigrateError(f"--from {from_version!r} is not a valid Python identifier.")
+
+    root_dir = getattr(settings, "APIVER_ROOT_DIR", None)
+    if not root_dir:
+        raise MigrateError(
+            "APIVER_ROOT_DIR is not set — apiver doesn't know where the aggregation root lives "
+            "(ADR 0007 item 3)."
+        )
+    root_prefix = getattr(settings, "APIVER_ROOT_PREFIX", None)
+    if root_prefix is None:
+        raise MigrateError(
+            "APIVER_ROOT_PREFIX is not set — apiver doesn't know the absolute URL path every "
+            "version mounts under (ADR 0007 item 3)."
+        )
+    root_prefix = root_prefix.lstrip("/")
+
+    # Checked before attempting the import below: an alias never has a
+    # registry.py to import in the first place, so without this, `--from`
+    # naming an alias would surface as an opaque ImportError instead of the
+    # legible "you can't alias an alias" (ticket #53).
+    configured_aliases: list[str] = getattr(settings, "APIVER_ALIASES", [])
+    if from_version in configured_aliases:
+        raise MigrateError(
+            f"--from {from_version!r} names an alias (APIVER_ALIASES), not a Version — an alias "
+            "cannot target another alias."
+        )
+
+    from_registry_dotted = f"{root_dir}.{from_version}.registry"
+    try:
+        from_registry_module = import_module(from_registry_dotted)
+    except ImportError as exc:
+        raise MigrateError(
+            f"{from_registry_dotted!r} could not be imported: {exc}. `--from` must name a version "
+            "that has already been mounted, so its registry.py already exists."
+        ) from exc
+    from_version_obj = getattr(from_registry_module, from_version, None)
+    if not isinstance(from_version_obj, Version):
+        raise MigrateError(f"{from_registry_dotted}.{from_version} is not a Version instance.")
+
+    if not _already_mounted(from_version, root_dir=root_dir):
+        raise MigrateError(
+            f"{from_version!r} is not mounted in the Aggregation Root — only an already-mounted "
+            "version can be aliased."
+        )
+    if _already_mounted(name, root_dir=root_dir):
+        aggregation_path = _resolve_target_dir(root_dir) / "urls.py"
+        raise MigrateError(f"{name!r} is already mounted in {aggregation_path}.")
+
+    alias_prefix = root_prefix + f"{name}/"
+    return _extend_aggregation_root_with_alias(
+        name, from_version, root_dir=root_dir, alias_prefix=alias_prefix
+    )
