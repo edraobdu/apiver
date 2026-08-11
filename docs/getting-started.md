@@ -2,9 +2,12 @@
 
 This walks a project that already has a working DRF API through adopting apiver: installing it,
 running `apiver init` to adopt the existing API as the Base Version, and then authoring and
-mounting a second version as a Delta. It was written and then followed verbatim while converting
+mounting a second version as a Delta. It was written and then followed verbatim against
 `reference/` (issue #22) — every step below was actually executed against a real project, not
-copied from the design docs.
+copied from the design docs. `reference/`'s own conversion is kept out of version control on
+purpose (so it stays an untouched "before" fixture); [`tutorial.md`](tutorial.md) is the literal,
+file-by-file record of that run, if you want to see every step of this guide applied for real,
+including the six catalogue rows the "awkward change-shapes" section only summarizes.
 
 ## Prerequisites
 
@@ -268,6 +271,27 @@ $ DJANGO_SETTINGS_MODULE=config.settings apiver manifest
 useful for `apiver versions`, which prints lineage/frozen/lifecycle/alias state without booting the
 project at all.
 
+## 8. Naming a stable pointer (optional)
+
+A client-facing name like `stable` or `current` that should move to a different version later
+(without every caller having to change its URL) is an `Alias`, not another mounted version —
+`apiver alias` declares one pointing at an already-mounted version, straight in the Aggregation
+Root:
+
+```console
+$ DJANGO_SETTINGS_MODULE=config.settings apiver alias stable --from v2
+```
+
+This writes nothing under `<APIVER_ROOT_DIR>/`: no `registry.py`, no schema/docs wiring of its
+own — `Alias.schema_view()`/`docs_view()` proxy straight through to the target Version's, so
+promoting the alias to a new target later is a one-line edit (`target=`) in the Aggregation Root,
+not a new registration. Like `mount`, `apiver alias` never touches `settings.py`; add the name to
+`APIVER_ALIASES` by hand to make it live:
+
+```python
+APIVER_ALIASES = ["stable"]
+```
+
 ---
 
 ## Friction found while dogfooding this guide (issue #22)
@@ -328,4 +352,7 @@ what doesn't work the first time.
   deserves a real object schema, not `string`, so `api/v2/serializers.py`'s `get_card` carries an
   `@extend_schema_field` decorator pointing at a small, unregistered `Serializer` used only for its
   shape.
-</content>
+
+See [`tutorial.md`](tutorial.md) for the same friction, walked step by step against `reference/`
+with the six catalogue rows above authored in full — followed again, verbatim, against the current
+`init`/`mount`/`alias` CLI, not left as a historical record of the old `migrate` command.
