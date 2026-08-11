@@ -110,3 +110,28 @@ path (the same class of bug ADR 0001 item 4/ticket 22 already found and fixed fo
 whichever the parent's chain already resolves). Only the version's actual Delta — its own
 `register()`/`override()`/`remove()` calls for changed endpoints — stays a hand-edit to the file
 `mount` just created.
+
+**Amendment (ticket #46): an Alias gets the same conventional-home, derived-path treatment item 5 gave
+`APIVER_VERSIONS`, via a new `apiver alias <name> --from <version>` command.** Review pushback on #45
+noted that, unlike a Version, an Alias had no fixed filesystem home — `Alias("stable", target=v2)` could
+be declared anywhere — making `APIVER_ALIASES`'s `{alias_name: "dotted.path"}` shape (ADR 0003 item 9)
+the one place a dotted path was still typed by hand after item 5 removed the equivalent for Versions.
+Decided: an Alias's conventional home is the Aggregation Root itself — already where `stable =
+Alias(...)` tended to live in practice — so `APIVER_ALIASES` narrows to a plain list of names, e.g.
+`["stable"]`, with each name's `Alias` instance derived the same way item 5 derives a Version's:
+`f"{APIVER_ROOT_DIR}.urls.{name}"`.
+
+`apiver alias <name> --from <version>` writes only the Aggregation Root's `urls.py` — appending
+`<name> = Alias(<name>, target=<version>)` and its `path()` entry — never `settings.py`, the same
+posture `mount` already has (item 7); it prints a reminder to add `<name>` to `APIVER_ALIASES` instead.
+Schema and docs need no separate wiring: `Alias.urls` already re-includes whatever the target Version
+registered under `schema/`/`docs/`, so mounting the alias is enough (ADR 0002 items 22-23). `--from` must
+name a Version already mounted in the Aggregation Root — never another Alias, since a chained alias would
+silently follow its target's target if repointed, which nothing today would signal — and the command
+refuses a name that collides with an already-mounted Version's, since both share one URL-prefix namespace
+under the Aggregation Root.
+
+**ADR 0003 item 2's directory-shape system check gains an Alias counterpart.** A new check validates
+that every `APIVER_ALIASES` entry resolves at its derived path and is an `Alias` instance — the same
+proactive `manage.py check` guarantee item 5's amendment above already gives a misconfigured
+`APIVER_VERSIONS` entry, extended to the one setting that still named a path by hand.
