@@ -30,7 +30,7 @@ from importlib import import_module
 from pathlib import Path
 
 from django.conf import settings
-from django.core.checks import Error, register
+from django.core.checks import Error, Warning, register
 
 AUTHORED_REQUIRED_FILES = ("serializers.py", "views.py", "registry.py")
 BASE_REQUIRED_FILES = ("registry.py",)
@@ -99,3 +99,39 @@ def _check_root(name: str, module_path: str, *, is_base: bool) -> list[Error]:
         )
 
     return messages
+
+
+@register()
+def check_manifest_freshness(app_configs=None, **kwargs) -> list[Error | Warning]:
+    """Nags locally, at Warning level, when `apiver.toml` doesn't match the
+    live Version objects (ticket 16, ADR 0003 item 9) — the same idiom as
+    `makemigrations --check --dry-run`, but firing on nearly every
+    `manage.py` invocation instead of only a CI step that remembers to ask.
+
+    Warning, not Error: the running server never reads the manifest (ADR
+    0003 item 8), so a stale file breaks nothing live and blocking
+    `runserver` over it would enforce more than the check needs. A project
+    wanting a hard local gate already has `manage.py check --fail-level
+    WARNING`.
+
+    A no-op when `APIVER_VERSIONS` isn't configured — a project that hasn't
+    adopted the manifest yet has nothing for this check to compare against.
+    """
+    if not getattr(settings, "APIVER_VERSIONS", None):
+        return []
+
+    from .manifest import ManifestError, manifest_diff
+
+    try:
+        resolved, current, committed = manifest_diff()
+    except ManifestError as exc:
+        return [Error(f"apiver.toml could not be generated: {exc}", id="apiver.E004")]
+
+    if committed != current:
+        return [
+            Warning(
+                f"{resolved} is stale or missing — run `apiver manifest` to regenerate it.",
+                id="apiver.W001",
+            )
+        ]
+    return []

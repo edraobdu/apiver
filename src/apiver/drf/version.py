@@ -53,6 +53,12 @@ class Registration:
     handler: Any
     basename: str | None = None
     name: str | None = None
+    # The Version that created this Registration, fixed at register()/
+    # override() time. Inherited routes reuse this same object by identity
+    # (ADR 0002 item 6), so it survives unchanged as the manifest's
+    # source_version even when a route is resolved through a descendant
+    # that never touched the key (ticket 16, ADR 0003 item 6).
+    source_version: str = ""
 
 
 @dataclass(frozen=True)
@@ -138,6 +144,18 @@ class Version:
         self._sunset_at: datetime | None = None
         self._own_build_cache: tuple[list, dict[str, Route]] | None = None
         self._schema_view_cache: Any | None = None
+
+    @property
+    def frozen(self) -> bool:
+        return self._frozen
+
+    @property
+    def deprecated(self) -> bool:
+        return self._deprecated
+
+    @property
+    def sunset_at(self) -> datetime | None:
+        return self._sunset_at
 
     def derive(self, name: str) -> "Version":
         """Return a new Version whose parent is `self`.
@@ -241,7 +259,7 @@ class Version:
             basename = basename or key
 
         self._registrations[key] = Registration(
-            key=key, kind=kind, handler=handler, basename=basename, name=name
+            key=key, kind=kind, handler=handler, basename=basename, name=name, source_version=self.name
         )
         self._own_build_cache = None
         return self
@@ -280,7 +298,7 @@ class Version:
             basename = basename or key
 
         self._registrations[key] = Registration(
-            key=key, kind=kind, handler=handler, basename=basename, name=name
+            key=key, kind=kind, handler=handler, basename=basename, name=name, source_version=self.name
         )
         self._own_build_cache = None
         return self
