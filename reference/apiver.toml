@@ -156,4 +156,141 @@ put = "update"
 patch = "partial_update"
 delete = "destroy"
 
+[versions.v2]
+frozen = false
+deprecated = false
+parent = "v1"
+
+[versions.v2.routes."^healthz/\\Z"]
+source_version = "v1"
+
+[versions.v2.routes."^healthz/\\Z".action]
+
+[versions.v2.routes."^notifications/mark\\-all\\-read/\\Z"]
+source_version = "v1"
+
+[versions.v2.routes."^notifications/mark\\-all\\-read/\\Z".action]
+
+[versions.v2.routes."^orders/export/\\Z"]
+source_version = "v1"
+
+[versions.v2.routes."^orders/export/\\Z".action]
+
+[versions.v2.routes."^payments/summary/\\Z"]
+source_version = "v1"
+
+[versions.v2.routes."^payments/summary/\\Z".action]
+
+[versions.v2.routes."^addresses/$"]
+source_version = "v1"
+
+[versions.v2.routes."^addresses/$".action]
+get = "list"
+post = "create"
+
+[versions.v2.routes."^addresses/(?P<pk>[^/.]+)/$"]
+source_version = "v1"
+
+[versions.v2.routes."^addresses/(?P<pk>[^/.]+)/$".action]
+get = "retrieve"
+put = "update"
+patch = "partial_update"
+delete = "destroy"
+
+[versions.v2.routes."^notifications/$"]
+source_version = "v1"
+
+[versions.v2.routes."^notifications/$".action]
+get = "list"
+post = "create"
+
+[versions.v2.routes."^notifications/(?P<pk>[^/.]+)/$"]
+source_version = "v1"
+
+[versions.v2.routes."^notifications/(?P<pk>[^/.]+)/$".action]
+get = "retrieve"
+put = "update"
+patch = "partial_update"
+delete = "destroy"
+
+[versions.v2.routes."^docs/\\Z"]
+source_version = "v2"
+
+[versions.v2.routes."^docs/\\Z".action]
+
+[versions.v2.routes."^schema/\\Z"]
+source_version = "v2"
+
+[versions.v2.routes."^schema/\\Z".action]
+
+[versions.v2.routes."^users/$"]
+source_version = "v2"
+
+[versions.v2.routes."^users/$".action]
+get = "list"
+post = "create"
+
+[versions.v2.routes."^users/(?P<pk>[^/.]+)/$"]
+source_version = "v2"
+
+[versions.v2.routes."^users/(?P<pk>[^/.]+)/$".action]
+get = "retrieve"
+put = "update"
+patch = "partial_update"
+delete = "destroy"
+
+[versions.v2.routes."^orders/$"]
+source_version = "v2"
+
+[versions.v2.routes."^orders/$".action]
+get = "list"
+post = "create"
+
+[versions.v2.routes."^orders/(?P<pk>[^/.]+)/$"]
+source_version = "v2"
+
+[versions.v2.routes."^orders/(?P<pk>[^/.]+)/$".action]
+get = "retrieve"
+put = "update"
+patch = "partial_update"
+delete = "destroy"
+
+[versions.v2.routes."^payments/$"]
+source_version = "v2"
+
+[versions.v2.routes."^payments/$".action]
+get = "list"
+post = "create"
+
+[versions.v2.routes."^payments/(?P<pk>[^/.]+)/$"]
+source_version = "v2"
+
+[versions.v2.routes."^payments/(?P<pk>[^/.]+)/$".action]
+get = "retrieve"
+put = "update"
+patch = "partial_update"
+delete = "destroy"
+
+[versions.v2.routes."^webhooks/$"]
+source_version = "v2"
+
+[versions.v2.routes."^webhooks/$".action]
+get = "list"
+post = "create"
+
+[versions.v2.routes."^webhooks/(?P<pk>[^/.]+)/$"]
+source_version = "v2"
+
+[versions.v2.routes."^webhooks/(?P<pk>[^/.]+)/$".action]
+get = "retrieve"
+put = "update"
+patch = "partial_update"
+delete = "destroy"
+
+[versions.v2.routes."^webhooks/(?P<pk>[^/.]+)/test-delivery/$"]
+source_version = "v2"
+
+[versions.v2.routes."^webhooks/(?P<pk>[^/.]+)/test-delivery/$".action]
+post = "test_delivery"
+
 [aliases]
