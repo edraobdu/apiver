@@ -43,11 +43,13 @@ def _cmd_mount(*, version_name: str) -> int:
     from .drf.migrate import MigrateError, write_mount
 
     try:
-        aggregation_path = write_mount(version_name)
+        registry_path, aggregation_path = write_mount(version_name)
     except MigrateError as exc:
         print(f"apiver: {exc}", file=sys.stderr)
         return 1
 
+    if registry_path is not None:
+        print(f"wrote {registry_path}")
     print(f"wrote {aggregation_path}")
     return 0
 
