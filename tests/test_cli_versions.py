@@ -1,7 +1,7 @@
 """CLI seam (subprocess) for `apiver versions` (ticket 17). Runs against a
 manifest generated from the same static fixture graph test_cli_manifest.py
 uses (tests/fixtures_manifest/api/), and — unlike `manifest`/
-`migrate` — with no DJANGO_SETTINGS_MODULE set at all, proving the command
+`init` — with no DJANGO_SETTINGS_MODULE set at all, proving the command
 works from apiver.toml alone (spec item 66)."""
 
 import os

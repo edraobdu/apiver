@@ -25,7 +25,7 @@ urlpatterns = [
     path("api/", include(gadgets_router.urls)),
     path("api/integrations/webhooks/", include(webhooks_router.urls)),
     # A pre-existing, unscoped drf-spectacular schema/docs pair (ticket #40,
-    # ticket 22) — proves migrate special-cases both SpectacularAPIView (into
+    # ticket 22) — proves init special-cases both SpectacularAPIView (into
     # a `schema_view(prefix=...)` call instead of registering it raw) and
     # SpectacularSwaggerView (into a version-qualified name and `url_name=`,
     # instead of preserving the bare "schema"/"docs" names verbatim).

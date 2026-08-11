@@ -4,15 +4,15 @@ from .checks import (
     check_max_live_versions,
     check_version_layout,
 )
+from .init import InitError
 from .manifest import ManifestError, build_manifest
-from .migrate import MigrateError
 from .version import Alias, CompositionError, Registration, Route, RouteIdentity, Version
 
 __all__ = [
     "Alias",
     "CompositionError",
+    "InitError",
     "ManifestError",
-    "MigrateError",
     "Registration",
     "Route",
     "RouteIdentity",

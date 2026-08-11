@@ -1,4 +1,4 @@
-"""A small, scattered pre-apiver API — the "before" state `apiver migrate`
+"""A small, scattered pre-apiver API — the "before" state `apiver init`
 (ticket 17) adopts. Mirrors reference/'s shape at a fraction of the size:
 one SimpleRouter viewset (no format-suffix duplicates, no api-root), one
 DefaultRouter viewset with an extra @action (format-suffix duplicates and

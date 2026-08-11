@@ -42,7 +42,7 @@ def test_docs_view_resolves_to_its_own_versions_schema(client, docs_path, expect
     schema route's name explicitly qualified to stay reversible; a derived
     Version (docs-v2, namespaced) needs the opposite — the plain local name,
     reversed through its own namespace. Both wired through `.register()`,
-    matching exactly what `apiver migrate` generates and what a hand-authored
+    matching exactly what `apiver init` generates and what a hand-authored
     version's `registry.py` should write (docs/getting-started.md)."""
     response = client.get(docs_path)
 

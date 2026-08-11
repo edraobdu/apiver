@@ -39,7 +39,7 @@ _Avoid_: channel, tag
 
 **Delta**:
 The set of overrides and removals one Version declares against its parent.
-_Avoid_: patch, diff (reserved for schema comparison), migration (reserved for `apiver migrate`)
+_Avoid_: patch, diff (reserved for schema comparison), migration (reserved for `apiver init`)
 
 ### Routing
 
@@ -93,7 +93,7 @@ _Avoid_: root (ambiguous between this and Root Prefix — the split this term ex
 The absolute URL path every Version mounts under (`APIVER_ROOT_PREFIX`, e.g. `"api/"`) — a routing fact,
 distinct from Root Directory. Combined with a Version's own name, it is what every Aggregation Root entry
 and every `schema_view(prefix=...)` call is built from (ADR 0007).
-_Avoid_: root, prefix alone (migrate's own `--prefix` flag names a related but not identical thing: which
+_Avoid_: root, prefix alone (init's own `--prefix` flag names a related but not identical thing: which
 pre-existing routes count as in scope for adoption)
 
 **Serving Version**:
