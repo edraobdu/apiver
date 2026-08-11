@@ -15,7 +15,7 @@ def client():
 @pytest.mark.django_db
 def test_create_accepts_https_target(client):
     response = client.post(
-        "/api/integrations/webhooks/",
+        "/api/v1/integrations/webhooks/",
         {"target_url": "https://example.com/hook", "event_type": "order.created", "secret": "s3cr3t"},
     )
 
@@ -25,7 +25,7 @@ def test_create_accepts_https_target(client):
 @pytest.mark.django_db
 def test_create_rejects_non_https_target(client):
     response = client.post(
-        "/api/integrations/webhooks/",
+        "/api/v1/integrations/webhooks/",
         {"target_url": "http://example.com/hook", "event_type": "order.created", "secret": "s3cr3t"},
     )
 
@@ -36,12 +36,12 @@ def test_create_rejects_non_https_target(client):
 @pytest.mark.django_db
 def test_secret_is_accepted_on_write_but_never_returned(client):
     create = client.post(
-        "/api/integrations/webhooks/",
+        "/api/v1/integrations/webhooks/",
         {"target_url": "https://example.com/hook", "event_type": "order.created", "secret": "s3cr3t"},
     )
     assert "secret" not in create.data
 
-    listed = client.get("/api/integrations/webhooks/").data["results"][0]
+    listed = client.get("/api/v1/integrations/webhooks/").data["results"][0]
     assert "secret" not in listed
 
 
@@ -51,7 +51,7 @@ def test_delivery_test_succeeds_for_an_active_endpoint(client):
         target_url="https://example.com/hook", event_type="order.created", secret="s3cr3t", is_active=True
     )
 
-    response = client.post(f"/api/integrations/webhooks/{webhook.pk}/test-delivery/")
+    response = client.post(f"/api/v1/integrations/webhooks/{webhook.pk}/test-delivery/")
 
     assert response.status_code == 200
     assert response.data == {"delivered": True, "target_url": "https://example.com/hook"}
@@ -63,7 +63,7 @@ def test_delivery_test_fails_with_a_non_standard_error_shape_for_an_inactive_end
         target_url="https://example.com/hook", event_type="order.created", secret="s3cr3t", is_active=False
     )
 
-    response = client.post(f"/api/integrations/webhooks/{webhook.pk}/test-delivery/")
+    response = client.post(f"/api/v1/integrations/webhooks/{webhook.pk}/test-delivery/")
 
     assert response.status_code == 422
     # Not DRF's usual {"detail": ...} — a genuinely different shape (ADR-worthy
@@ -81,6 +81,6 @@ def test_webhooks_are_mounted_two_segments_deeper_than_every_other_resource(clie
         target_url="https://example.com/hook", event_type="order.created", secret="s3cr3t"
     )
 
-    response = client.get(f"/api/integrations/webhooks/{webhook.pk}/")
+    response = client.get(f"/api/v1/integrations/webhooks/{webhook.pk}/")
 
     assert response.status_code == 200
