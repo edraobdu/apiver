@@ -17,16 +17,23 @@ running server never reads this file — it exists only for tooling outside
 the process (ADR 0003 item 8).
 """
 
-import tomllib
 from importlib import import_module
 from pathlib import Path
 from typing import Any
 
 from django.conf import settings
 
+from ..versions_report import MANIFEST_FILENAME, load_committed_manifest
 from .version import Alias, Version
 
-MANIFEST_FILENAME = "apiver.toml"
+__all__ = [
+    "MANIFEST_FILENAME",
+    "ManifestError",
+    "build_manifest",
+    "load_committed_manifest",
+    "manifest_diff",
+    "manifest_path",
+]
 
 
 class ManifestError(RuntimeError):
@@ -115,15 +122,6 @@ def manifest_path(path: str | Path | None = None) -> Path:
     if configured is not None:
         return Path(configured)
     return Path.cwd() / MANIFEST_FILENAME
-
-
-def load_committed_manifest(path: Path) -> dict[str, Any] | None:
-    """The manifest currently on disk, or None if there isn't one — a
-    missing file is a distinct, equally-stale case from a mismatched one
-    (ADR 0003 item 9)."""
-    if not path.is_file():
-        return None
-    return tomllib.loads(path.read_text())
 
 
 def manifest_diff(path: str | Path | None = None) -> tuple[Path, dict[str, Any], dict[str, Any] | None]:

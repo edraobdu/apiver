@@ -1,25 +1,29 @@
-"""apiver's command-line entry point (ticket 16).
+"""apiver's command-line entry point (tickets 16-17).
 
 A standalone script, not a `manage.py` subcommand, so offline tooling can
-introspect a project without importing the whole thing (spec item 66) — it
-still needs `DJANGO_SETTINGS_MODULE` set, exactly as any other
-Django-adjacent CLI (celery, gunicorn) requires, since the manifest is built
+introspect a project without importing the whole thing (spec item 66).
+`manifest` and `migrate` still need `DJANGO_SETTINGS_MODULE` set, exactly as
+any other Django-adjacent CLI (celery, gunicorn) requires, since they build
 from live `Version`/`Alias` objects that only exist once Django settings are
-configured.
+configured. `versions` is the exception: it reads only the already-written
+`apiver.toml` off disk, so it needs neither Django settings nor an
+importable project — its imports are therefore kept out of this module's
+top level and loaded inside its own command function, so merely invoking
+`apiver versions` never pulls in `apiver.drf` (which imports DRF/
+drf-spectacular, and those read Django settings at import time).
 """
 
 import argparse
 import os
 import sys
+from pathlib import Path
 
-import django
-import tomli_w
-
-from .drf.manifest import ManifestError, manifest_diff
-from .drf.migrate import MigrateError, write_registry
+from .versions_report import MANIFEST_FILENAME, format_versions_report, load_committed_manifest
 
 
 def _cmd_migrate(*, prefix: str, manifest_path: str | None) -> int:
+    from .drf.migrate import MigrateError, write_registry
+
     try:
         registry_path = write_registry(prefix=prefix)
     except MigrateError as exc:
@@ -35,6 +39,10 @@ def _cmd_migrate(*, prefix: str, manifest_path: str | None) -> int:
 
 
 def _cmd_manifest(*, check: bool, path: str | None) -> int:
+    import tomli_w
+
+    from .drf.manifest import ManifestError, manifest_diff
+
     try:
         resolved, current, committed = manifest_diff(path)
     except ManifestError as exc:
@@ -59,6 +67,20 @@ def _cmd_manifest(*, check: bool, path: str | None) -> int:
 
     resolved.write_text(tomli_w.dumps(current))
     print(f"wrote {resolved}")
+    return 0
+
+
+def _cmd_versions(*, path: str | None) -> int:
+    resolved = Path(path) if path is not None else Path.cwd() / MANIFEST_FILENAME
+    manifest = load_committed_manifest(resolved)
+    if manifest is None:
+        print(
+            f"apiver: {resolved} does not exist — run `apiver manifest` to generate it.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(format_versions_report(manifest), end="")
     return 0
 
 
@@ -98,11 +120,29 @@ def main(argv: list[str] | None = None) -> int:
         help="Where to write apiver.toml (default: ./apiver.toml).",
     )
 
+    versions_parser = subparsers.add_parser(
+        "versions",
+        help="Print lineage, frozen status, lifecycle state, alias pointers and route composition "
+        "from apiver.toml, without booting the project.",
+    )
+    versions_parser.add_argument(
+        "--path",
+        default=None,
+        help="Where to read apiver.toml (default: ./apiver.toml).",
+    )
+
     args = parser.parse_args(argv)
+
+    # `versions` reads only the committed manifest (spec item 66) — the only
+    # apiver command that works without DJANGO_SETTINGS_MODULE set.
+    if args.command == "versions":
+        return _cmd_versions(path=args.path)
 
     if not os.environ.get("DJANGO_SETTINGS_MODULE"):
         print("apiver: DJANGO_SETTINGS_MODULE is not set.", file=sys.stderr)
         return 1
+
+    import django
 
     django.setup()
 
