@@ -295,9 +295,7 @@ def _derive_router_prefix(
     return None
 
 
-def discover(
-    root_patterns: Any, *, prefix: str, schema_mount_prefix: str, base_name: str
-) -> DiscoveryResult:
+def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str, base_name: str) -> DiscoveryResult:
     """Walk `root_patterns` (a URLconf's `urlpatterns` list), classify
     every in-scope route, and turn it into a plan for `Version.register()`.
 
