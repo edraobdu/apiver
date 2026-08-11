@@ -32,7 +32,9 @@ _Avoid_: child version, derived version
 
 **Alias**:
 A movable name pointing at a Version — `stable`, `latest`, `testing`. Aliases are convenience routes, not
-version identifiers; the Version an alias names may change, a Version's meaning may not.
+version identifiers; the Version an alias names may change, a Version's meaning may not. Declared and
+mounted directly in the Aggregation Root by convention (`apiver alias`) — an Alias has no package of its
+own the way a Version does.
 _Avoid_: channel, tag
 
 **Delta**:
@@ -77,7 +79,8 @@ _Avoid_: merging, flattening (reserved for squash)
 The generated, hand-maintained module (`<root package>/urls.py`) that composes every Live Version's
 mount, one `include()` per Version, each already carrying its full absolute path. The project's actual
 root `urls.py` includes it once, at an empty prefix, and never changes again as Versions are added
-(ADR 0007).
+(ADR 0007). Also where every Alias is declared and mounted — `apiver alias` appends here, since an Alias
+has no package of its own.
 _Avoid_: root urls, api urls (ambiguous with the project's own true root `urls.py`)
 
 **Root Directory**:
