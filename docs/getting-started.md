@@ -369,6 +369,6 @@ what doesn't work the first time.
   `@extend_schema_field` decorator pointing at a small, unregistered `Serializer` used only for its
   shape.
 
-See [`tutorial.md`](tutorial.md) for the same friction, walked step by step against `reference/`
-with the six catalogue rows above authored in full — followed again, verbatim, against the current
-`init`/`mount`/`alias` CLI, not left as a historical record of the old `migrate` command.
+See [`tutorial.md`](tutorial.md) for this same friction walked step by step against `reference/`,
+using today's `init`/`mount`/`alias` commands throughout — plus the six catalogue rows above
+authored in full, which this guide only summarizes.
