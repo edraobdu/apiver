@@ -29,6 +29,8 @@ def test_base_version_schema_contains_exactly_its_own_paths(client):
         "/api/v1/payments/{id}/",
         "/api/v1/payments/summary/",
         "/api/v1/pong/",
+        "/api/v1/invoices/{id}/",
+        "/api/v1/invoices/{id}/flag/",
     }
 
 

@@ -6,11 +6,14 @@ from django.utils import timezone
 from apiver.drf import Alias, Version
 
 from .views import (
+    InvoiceViewSet,
+    InvoiceViewSetV2,
     PaymentsSummaryView,
     PaymentViewSet,
     PaymentViewSetV3,
     PingViewSet,
     PlainPingView,
+    RedactedInvoiceViewSetV2,
     RefundViewSetV2,
     pong,
 )
@@ -21,11 +24,19 @@ v1.register("payments", PaymentViewSet, basename="payments")
 v1.register("payments/summary/", PaymentsSummaryView, name="payments-summary")
 v1.register("pong/", pong, name="pong")
 v1.register("plain-ping/", PlainPingView, name="plain-ping")
+v1.register("invoices", InvoiceViewSet, basename="invoices")
 
 # V2 never registers payments/ping/etc itself — it inherits v1's entire
 # resolution table live, and only adds what's new to it (ticket 08).
 v2 = v1.derive("v2")
 v2.register("refunds", RefundViewSetV2, basename="refunds")
+
+# ticket 14: two removal idioms, both schema-correct — Meta.fields surgery
+# (override, drops internal_note from the inherited "invoices" resource) and
+# del self.fields[...] in __init__ (a fresh registration, since it doesn't
+# need to replace anything V1 already serves).
+v2.override("invoices", InvoiceViewSetV2, basename="invoices")
+v2.register("invoices-redacted", RedactedInvoiceViewSetV2, basename="invoices-redacted")
 
 # V3 exercises the loud verbs (ticket 09): payments gets a new shape, ping
 # is gone under V3 while V1/V2 keep serving it unchanged.
