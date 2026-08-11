@@ -4,7 +4,7 @@ from django.core.checks import Error, Warning
 from django.core.checks.registry import registry
 from django.test import override_settings
 
-from apiver.drf import ManifestError, build_manifest, check_manifest_freshness
+from apiver.drf import ManifestError, build_manifest, check_manifest_freshness, check_max_live_versions
 from apiver.drf.manifest import load_committed_manifest, manifest_diff, manifest_path
 from tests.fixtures_manifest.registry import FIXED_SUNSET, stable, v1, v2
 
@@ -183,3 +183,62 @@ def test_manifest_diff_reports_a_missing_committed_manifest(tmp_path):
 
 def test_alias_target_is_referenced_by_object_not_by_a_copy():
     assert stable.target is v2
+
+
+@override_settings(APIVER_VERSIONS={})
+def test_check_max_live_versions_is_a_noop_without_apiver_versions_configured():
+    assert check_max_live_versions() == []
+
+
+@override_settings(
+    APIVER_VERSIONS={
+        "v1": "tests.fixtures_manifest.registry.v1",
+        "v2": "tests.fixtures_manifest.registry.v2",
+    },
+)
+def test_check_max_live_versions_is_silent_under_the_default_max():
+    assert check_max_live_versions() == []
+
+
+@override_settings(
+    APIVER_VERSIONS={
+        "v1": "tests.fixtures_manifest.registry.v1",
+        "v2": "tests.fixtures_manifest.registry.v2",
+    },
+    APIVER_MAX_LIVE_VERSIONS=1,
+)
+def test_check_max_live_versions_warns_once_the_count_exceeds_the_configured_max():
+    messages = check_max_live_versions()
+
+    assert len(messages) == 1
+    assert isinstance(messages[0], Warning)
+    assert messages[0].id == "apiver.W002"
+    assert "2 Live Versions" in messages[0].msg
+    assert "v1" in messages[0].msg
+    assert "v2" in messages[0].msg
+
+
+@override_settings(
+    APIVER_VERSIONS={
+        "v1": "tests.fixtures_manifest.registry.v1",
+        "v2": "tests.fixtures_manifest.registry.v2",
+    },
+    APIVER_MAX_LIVE_VERSIONS=2,
+)
+def test_check_max_live_versions_is_silent_exactly_at_the_configured_max():
+    assert check_max_live_versions() == []
+
+
+@override_settings(
+    APIVER_VERSIONS={"v1": "tests.fixtures_manifest.registry.does_not_exist"},
+)
+def test_check_max_live_versions_reports_a_configuration_error_loudly():
+    messages = check_max_live_versions()
+
+    assert len(messages) == 1
+    assert isinstance(messages[0], Error)
+    assert messages[0].id == "apiver.E005"
+
+
+def test_max_live_versions_check_is_registered_with_djangos_check_framework():
+    assert check_max_live_versions in registry.registered_checks
