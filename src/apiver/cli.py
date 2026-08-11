@@ -15,6 +15,14 @@ nor an importable project — its imports are therefore kept out of this
 module's top level and loaded inside its own command function, so merely
 invoking `apiver versions` never pulls in `apiver.drf` (which imports DRF/
 drf-spectacular, and those read Django settings at import time).
+
+Ticket #54 also drops the matching `PYTHONPATH=.` requirement: `manage.py`
+gets the project root on `sys.path` for free (Python adds a
+directly-executed script's own directory, and `manage.py` is invoked from
+the project root), but the `apiver` entry point is installed into
+`.venv/bin` and gets no such trick — so `main()` puts the current working
+directory on `sys.path` itself, the same "project root" `pyproject.toml`
+resolution already assumes.
 """
 
 import argparse
@@ -237,6 +245,14 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+
+    # The project root apiver.toml/pyproject.toml resolution already assumes
+    # (cwd) — put on sys.path so `--settings`/env var/pyproject.toml values
+    # naming project-local modules (e.g. `config.settings`) actually import,
+    # without a developer having to export PYTHONPATH=. themselves.
+    cwd = str(Path.cwd())
+    if cwd not in sys.path:
+        sys.path.insert(0, cwd)
 
     # `versions` reads only the committed manifest (spec item 66) — the only
     # apiver command that works without DJANGO_SETTINGS_MODULE set.

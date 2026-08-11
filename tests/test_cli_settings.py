@@ -1,12 +1,18 @@
-"""CLI seam (subprocess) for `apiver --settings` and its
-`[tool.apiver].django_settings_module` pyproject.toml fallback (ticket #54).
-Resolution order is flag -> DJANGO_SETTINGS_MODULE env var -> pyproject.toml
--> the existing "not set" error, mirroring pytest-django's own `--ds`
-precedence. `mount` against `tests/fixtures_mount/` is the vehicle — any
-Django-settings-requiring subcommand would do, but it's already exercised
-elsewhere in the suite, so reaching a real "wrote ..." success line here is
-solid proof resolution actually fed `DJANGO_SETTINGS_MODULE` before
-`django.setup()`.
+"""CLI seam (subprocess) for `apiver --settings`, its
+`[tool.apiver].django_settings_module` pyproject.toml fallback, and the
+matching `sys.path` fix that drops the `PYTHONPATH=.` requirement
+(ticket #54). Resolution order is flag -> DJANGO_SETTINGS_MODULE env var ->
+pyproject.toml -> the existing "not set" error, mirroring pytest-django's
+own `--ds` precedence. `mount` against `tests/fixtures_mount/` is the
+vehicle — any Django-settings-requiring subcommand would do, but it's
+already exercised elsewhere in the suite, so reaching a real "wrote ..."
+success line here is solid proof resolution actually fed
+`DJANGO_SETTINGS_MODULE` before `django.setup()`. `PYTHONPATH` here only
+ever carries `src/`, needed so `python -m apiver.cli` can import the
+`apiver` package itself (an artifact of running from a checkout rather than
+an installed console script) — never the project root, proving `main()`'s
+own `sys.path` insertion is what makes `tests.fixtures_mount.settings`
+importable.
 """
 
 import os
@@ -34,7 +40,7 @@ def _run(
         env.pop("DJANGO_SETTINGS_MODULE", None)
     else:
         env["DJANGO_SETTINGS_MODULE"] = settings_env
-    env["PYTHONPATH"] = os.pathsep.join([str(REPO_ROOT / "src"), str(REPO_ROOT)])
+    env["PYTHONPATH"] = str(REPO_ROOT / "src")
     return subprocess.run(
         [sys.executable, "-m", "apiver.cli", *args],
         cwd=str(REPO_ROOT),
@@ -124,6 +130,16 @@ def test_settings_flag_takes_precedence_over_a_configured_pyproject_toml_value(p
         "v1",
         settings_env=None,
     )
+
+    assert result.returncode == 0, result.stderr
+    assert "wrote" in result.stdout
+
+
+def test_cwd_is_importable_without_pythonpath_naming_the_project_root():
+    """`PYTHONPATH` here only ever carries `src/` (see module docstring) —
+    `tests.fixtures_mount.settings` imports anyway, proving `main()` put
+    `cwd` (== REPO_ROOT, where this subprocess runs) on `sys.path` itself."""
+    result = _run("mount", "v2", "--from", "v1", settings_env="tests.fixtures_mount.settings")
 
     assert result.returncode == 0, result.stderr
     assert "wrote" in result.stdout
