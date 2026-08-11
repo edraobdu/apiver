@@ -159,17 +159,57 @@ $ DJANGO_SETTINGS_MODULE=config.settings python manage.py test   # or pytest
 `manage.py check` runs apiver's own system checks — a mis-shaped version directory or a stale
 manifest surfaces here, not at request time.
 
-## 5. Author a second version
+## 5. Mount a second version
 
-An authored (non-base) version is **hand-written**, not generated — `migrate` only ever adopts the
-Base Version. Create the flat layout apiver's layout check requires:
+An authored (non-base) version is never hand-written into existence — `apiver mount` is the only
+way one starts existing at all:
+
+```console
+$ DJANGO_SETTINGS_MODULE=config.settings apiver mount v2 --from v1
+```
+
+This generates `api/v2/registry.py` from scratch — refusing if it already exists, the same
+one-shot-scaffold posture `migrate` already has for the Base Version's generated file — and appends
+`v2`'s `include()` to the Aggregation Root, at `APIVER_ROOT_PREFIX + "v2/"`:
+
+```python
+"""Generated once by `apiver mount`; hand-editable afterwards, like
+Django's own `startapp` boilerplate — it is not regenerated on later
+runs (ADR 0003 item 4). Add this version's changed endpoints below
+with register()/override()/remove().
+"""
+
+from api.v1.registry import v1
+
+v2 = v1.derive("v2")
+v2.override("schema/", v2.schema_view(prefix="api/v2/"), name="schema")
+v2.register("docs/", v2.docs_view(), name="docs")
+```
+
+`--from` is required — it's how `mount` knows which version to derive the new one from, and it's
+checked against `v2`'s own resolved keys (not assumed): `v1` already had a `schema/` route, so `v2`
+gets `override()`; `v1` never wired `docs/` at all, so `v2` gets a fresh `register()` instead. Every
+version gets both wired unconditionally, even one derived from a chain that never had docs of its
+own — an API without a reachable schema and docs page isn't shippable, so `mount` never leaves either
+unwired for "no source to copy from."
+
+`mount` never touches `settings.py` — add the new name to `APIVER_VERSIONS` by hand:
+
+```python
+APIVER_VERSIONS = ["v1", "v2"]
+```
+
+## 6. Add the version's changed endpoints
+
+Create the flat layout apiver's layout check requires, alongside the `registry.py` `mount` already
+wrote:
 
 ```
 api/v2/
-    __init__.py
-    serializers.py   # subclasses of v1's serializers that need to change, named ...V2
-    views.py          # subclasses of v1's views/viewsets that need to change, named ...V2
-    registry.py       # the Delta: derive from v1, then register()/override()/remove()
+    __init__.py       # already created by mount
+    registry.py        # already created by mount — derive() plus schema/docs, add your Delta below
+    serializers.py     # subclasses of v1's serializers that need to change, named ...V2
+    views.py            # subclasses of v1's views/viewsets that need to change, named ...V2
 ```
 
 Class-based handlers registered or overridden on a non-base version must carry the version's name,
@@ -178,7 +218,7 @@ this at `register()`/`override()` time, because drf-spectacular names schema com
 `__class__.__name__` alone, and two versions sharing a bare class name would collide in the
 generated schema.
 
-`registry.py` looks like:
+Hand-edit `registry.py` to add the version's actual Delta, below the two lines `mount` already wrote:
 
 ```python
 from api.v1.registry import v1
@@ -186,9 +226,10 @@ from .serializers import PaymentSerializerV2
 from .views import PaymentViewSetV2
 
 v2 = v1.derive("v2")
+v2.override("schema/", v2.schema_view(prefix="api/v2/"), name="schema")
+v2.register("docs/", v2.docs_view(), name="docs")
 v2.override("payments", PaymentViewSetV2, basename="payments")
 v2.remove("legacy-invoices")
-v2.override("schema/", v2.schema_view(prefix="api/v2/"), name="schema")
 ```
 
 `override()` replaces a registration's *entire* route set — there's no way to override just one
@@ -196,34 +237,13 @@ action and inherit the rest, so a narrower override drops whatever routes the pa
 had that the child's doesn't re-declare. `remove()` only stops *this* version (and anything derived
 from it) from serving a key; the parent keeps serving it unchanged.
 
-Two things that aren't obvious the first time through:
-
-- **The schema route needs `override()`, not `register()`.** `migrate` already registered `schema/`
-  (and `docs/`) on the Base Version, and every authored version inherits both by default — so giving
-  v2 its own, correctly-scoped schema document means *replacing* that inherited registration, the
-  same as any other changed resource. `register()` would raise ("already registered on … or one of
-  its ancestors") since the key already resolves through the parent.
-- **Reusing a handler completely unchanged still needs a version-suffixed subclass.** The
-  class-name-suffix rule (above) is enforced on every class-based `register()`/`override()` call on
-  an authored version, with no exception for "the class didn't actually change" — this bites most
-  often when moving a resource's URL (its handler is identical, only the mount key differs) or
-  re-registering a third-party class-based view (e.g. drf-spectacular's own `SpectacularSwaggerView`)
-  that this project doesn't own and can't rename. The fix is the same either way: a trivial local
-  subclass that exists only to carry the suffix, e.g.
-  `class SpectacularSwaggerViewV2(SpectacularSwaggerView): pass`.
-
-## 6. Mount the new version
-
-```console
-$ DJANGO_SETTINGS_MODULE=config.settings apiver mount v2
-```
-
-Appends `v2`'s `include()` to the Aggregation Root, at `APIVER_ROOT_PREFIX + "v2/"`. `mount` never
-touches `settings.py` — add the new name to `APIVER_VERSIONS` by hand:
-
-```python
-APIVER_VERSIONS = ["v1", "v2"]
-```
+**Reusing a handler completely unchanged still needs a version-suffixed subclass.** The
+class-name-suffix rule (above) is enforced on every class-based `register()`/`override()` call on an
+authored version, with no exception for "the class didn't actually change" — this bites most often
+when moving a resource's URL (its handler is identical, only the mount key differs) or
+re-registering a third-party class-based view that this project doesn't own and can't rename. The
+fix is the same either way: a trivial local subclass that exists only to carry the suffix, e.g.
+`class SomeThirdPartyViewV2(SomeThirdPartyView): pass`.
 
 ## 7. Verify again
 

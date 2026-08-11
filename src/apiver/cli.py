@@ -39,17 +39,16 @@ def _cmd_migrate(*, prefix: str | None, manifest_path: str | None) -> int:
     return _cmd_manifest(check=False, path=manifest_path)
 
 
-def _cmd_mount(*, version_name: str) -> int:
+def _cmd_mount(*, version_name: str, from_version: str) -> int:
     from .drf.migrate import MigrateError, write_mount
 
     try:
-        registry_path, aggregation_path = write_mount(version_name)
+        registry_path, aggregation_path = write_mount(version_name, from_version=from_version)
     except MigrateError as exc:
         print(f"apiver: {exc}", file=sys.stderr)
         return 1
 
-    if registry_path is not None:
-        print(f"wrote {registry_path}")
+    print(f"wrote {registry_path}")
     print(f"wrote {aggregation_path}")
     return 0
 
@@ -139,13 +138,21 @@ def main(argv: list[str] | None = None) -> int:
 
     mount_parser = subparsers.add_parser(
         "mount",
-        help="Mount an authored version into the aggregation root: append its include() to "
+        help="Author a new version: generate its registry.py from scratch, derived from --from, with "
+        "its own schema/docs routes already wired, then append its include() to "
         "<APIVER_ROOT_DIR>/urls.py.",
     )
     mount_parser.add_argument(
         "version",
-        help="The version's name (e.g. v2) — its registry.py must already exist at "
-        "<APIVER_ROOT_DIR>.<version>.registry.",
+        help="The new version's name (e.g. v2) — mount creates <APIVER_ROOT_DIR>.<version>.registry "
+        "from scratch; refuses if it already exists.",
+    )
+    mount_parser.add_argument(
+        "--from",
+        dest="from_version",
+        required=True,
+        help="The version to derive the new version from (e.g. v1) — its registry.py must already "
+        "exist at <APIVER_ROOT_DIR>.<from>.registry.",
     )
 
     versions_parser = subparsers.add_parser(
@@ -179,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "migrate":
         return _cmd_migrate(prefix=args.prefix, manifest_path=args.manifest_path)
     if args.command == "mount":
-        return _cmd_mount(version_name=args.version)
+        return _cmd_mount(version_name=args.version, from_version=args.from_version)
 
     parser.error(f"unknown command {args.command!r}")
     return 2
