@@ -16,10 +16,13 @@ plain list of Live names) — and each version's directory is *derived* as
 item 4): a mis-named directory isn't flagged by this check, it's invisible,
 because nothing ever derives a path to it in the first place.
 
-- `APIVER_BASE_VERSION`: the one entry in `APIVER_VERSIONS` (if any) that
-  names the Base Version. Its root is exempt from carrying
+- `APIVER_BASE_VERSION`: required alongside `APIVER_VERSIONS`, the one
+  entry that names the Base Version. Its root is exempt from carrying
   `serializers.py`/`views.py` (ADR 0003 item 3) — those stay wherever the
-  pre-existing project already put them.
+  pre-existing project already put them. Left unset, this check couldn't
+  tell the Base Version's relaxed layout apart from every Authored
+  Version's stricter one, so it's enforced explicitly (`apiver.E007`)
+  rather than silently checking the base as if it were authored.
 
 `APIVER_BASE_VERSION` is taken on trust, not verified against a live
 `Version`'s `.parent` — there is no live registry yet for this check to
@@ -60,13 +63,25 @@ def check_version_layout(app_configs=None, **kwargs) -> list[Error]:
     if not root_dir:
         return [
             Error(
-                "APIVER_VERSIONS is set but APIVER_ROOT_DIR is not — apiver doesn't know where "
-                "each version's package lives (ADR 0007 item 3).",
+                "apiver needs APIVER_ROOT_DIR set to derive each version's package path from "
+                "APIVER_VERSIONS's names — without it, this check has nothing to check "
+                "(ADR 0007 item 3).",
                 id="apiver.E006",
             )
         ]
 
     base_version = getattr(settings, "APIVER_BASE_VERSION", None)
+    if not base_version:
+        return [
+            Error(
+                "apiver needs APIVER_BASE_VERSION set to tell the Base Version's relaxed layout "
+                "(registry.py only) apart from every Authored Version's stricter one "
+                "(serializers.py/views.py/registry.py, ADR 0003 item 3) — without it, every "
+                "configured version is checked as Authored, including the actual base.",
+                id="apiver.E007",
+            )
+        ]
+
     messages: list[Error] = []
     for name in version_names:
         is_base = name == base_version

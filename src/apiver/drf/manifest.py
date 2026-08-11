@@ -68,8 +68,9 @@ def _load_versions() -> dict[str, Version]:
     root_dir: str | None = getattr(settings, "APIVER_ROOT_DIR", None)
     if not root_dir:
         raise ManifestError(
-            "APIVER_ROOT_DIR is not set — apiver doesn't know where each version's package "
-            "lives. Set it to the dotted path of the aggregation root package (ADR 0007 item 3)."
+            "apiver needs APIVER_ROOT_DIR set to derive each APIVER_VERSIONS name's dotted path "
+            "as f'{APIVER_ROOT_DIR}.{name}.registry.{name}' — without it, there is no live "
+            "Version object to read (ADR 0007 items 3, 5)."
         )
 
     versions: dict[str, Version] = {}
