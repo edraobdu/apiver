@@ -16,6 +16,22 @@ import django
 import tomli_w
 
 from .drf.manifest import ManifestError, manifest_diff
+from .drf.migrate import MigrateError, write_registry
+
+
+def _cmd_migrate(*, prefix: str, manifest_path: str | None) -> int:
+    try:
+        registry_path = write_registry(prefix=prefix)
+    except MigrateError as exc:
+        print(f"apiver: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"wrote {registry_path}")
+    # Folded into migrate for the base version (ADR 0003 item 7) — the
+    # newly-written registry.py is what APIVER_VERSIONS must already point
+    # at for this to succeed; a registration in settings has to precede
+    # the file existing, exactly as `apiver manifest` already requires.
+    return _cmd_manifest(check=False, path=manifest_path)
 
 
 def _cmd_manifest(*, check: bool, path: str | None) -> int:
@@ -65,6 +81,23 @@ def main(argv: list[str] | None = None) -> int:
         help="Where to read/write apiver.toml (default: ./apiver.toml).",
     )
 
+    migrate_parser = subparsers.add_parser(
+        "migrate",
+        help="Adopt an existing project as the base version: generate registry.py and the manifest, "
+        "moving nothing.",
+    )
+    migrate_parser.add_argument(
+        "--prefix",
+        required=True,
+        help="Only routes under this absolute path are adopted (e.g. api/) — excludes admin/, "
+        "third-party auth urls, and anything else outside the API surface.",
+    )
+    migrate_parser.add_argument(
+        "--manifest-path",
+        default=None,
+        help="Where to write apiver.toml (default: ./apiver.toml).",
+    )
+
     args = parser.parse_args(argv)
 
     if not os.environ.get("DJANGO_SETTINGS_MODULE"):
@@ -75,6 +108,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "manifest":
         return _cmd_manifest(check=args.check, path=args.path)
+    if args.command == "migrate":
+        return _cmd_migrate(prefix=args.prefix, manifest_path=args.manifest_path)
 
     parser.error(f"unknown command {args.command!r}")
     return 2
