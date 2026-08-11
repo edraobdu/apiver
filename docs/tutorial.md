@@ -1,0 +1,438 @@
+# Tutorial: converting `reference/` from scratch
+
+This is [`getting-started.md`](getting-started.md), walked literally against `reference/` — every
+file it touches, every command it runs, and the actual output each one produced. `reference/` is
+kept out of version control on purpose (issue #22): it's meant to stay the "before" fixture so it
+can be adopted by hand, not carried pre-converted. Follow this tutorial step by step against a
+clean `reference/` checkout to reproduce the same flow yourself; nothing here does anything
+`getting-started.md` doesn't already describe in general terms.
+
+Run every command from `reference/` itself, using `uv run` (or an activated `.venv`) unless noted
+otherwise.
+
+## 0. Fix the Django-version mismatch
+
+`reference/pyproject.toml` pins `django~=6.1`. apiver's own supported range is `django~=5.2`
+(`getting-started.md`'s Prerequisites) — nothing in `apiver init`/`mount` catches this up front;
+it surfaces as a `uv` resolver failure the moment apiver is added as a dependency with an
+incompatible Django already pinned. Fix the pin first:
+
+```diff
+ dependencies = [
+-    "django~=6.1",
++    "django~=5.2",
+     "djangorestframework~=3.18",
+     "drf-spectacular~=0.30",
+ ]
+```
+
+## 1. Install apiver
+
+Add it as an editable path dependency, alongside the version fix above:
+
+```diff
+ dependencies = [
+     "django~=5.2",
+     "djangorestframework~=3.18",
+     "drf-spectacular~=0.30",
++    "apiver",
+ ]
+ 
+ [dependency-groups]
+ dev = [
+     "pytest>=8.0",
+     "pytest-django>=4.9",
+ ]
++
++[tool.uv.sources]
++apiver = { path = "..", editable = true }
+```
+
+```console
+$ uv sync
+Resolved 25 packages in 394ms
+   Building apiver @ file:///.../apiver
+Installed 1 package in 1ms
+ ~ apiver==0.1.0.dev0 (from file:///.../apiver)
+```
+
+Then add `"apiver"` to `config/settings.py`'s `INSTALLED_APPS`, right after `drf_spectacular`:
+
+```diff
+ INSTALLED_APPS = [
+     "django.contrib.contenttypes",
+     "django.contrib.auth",
+     "rest_framework",
+     "drf_spectacular",
++    "apiver",
+     "users",
+     "payments",
+     ...
+ ]
+```
+
+## 2. Add the four settings
+
+At the bottom of `config/settings.py`:
+
+```python
+APIVER_ROOT_DIR = "api"
+APIVER_ROOT_PREFIX = "api/"
+APIVER_BASE_VERSION = "v1"
+APIVER_VERSIONS = ["v1"]
+```
+
+`reference/`'s whole pre-existing API already lives under `api/` (`config/urls.py` mounts every
+app at `path("api/", ...)`), which is exactly why no `--prefix` override is needed in the next
+step — `APIVER_ROOT_PREFIX` already names it.
+
+## 3. Run `apiver init`
+
+```console
+$ uv run apiver --settings config.settings init
+wrote .../reference/api/v1/registry.py
+wrote .../reference/api/urls.py
+wrote .../reference/apiver.toml
+```
+
+`api/v1/registry.py` is generated in full — every one of `reference/`'s pre-existing resources
+(`addresses`, `legacy-invoices`, `notifications` plus its `mark-all-read` action, `orders` plus its
+CSV export, `payments` plus its summary view, `users`, `webhooks`) shows up as one `register()`
+call, importing the existing views exactly where they already lived:
+
+```python
+v1 = Version('v1')
+v1.register('addresses', AddressViewSet, basename='addresses')
+v1.register('docs/', v1.docs_view(), name='v1-docs')
+v1.register('healthz/', healthz, name='healthz')
+v1.register('integrations/webhooks', WebhookEndpointViewSet, basename='webhooks')
+v1.register('legacy-invoices', LegacyInvoiceViewSet, basename='legacy-invoices')
+v1.register('notifications', NotificationViewSet, basename='notifications')
+v1.register('notifications/mark-all-read/', mark_all_read, name='notifications-mark-all-read')
+v1.register('orders', OrderViewSet, basename='orders')
+v1.register('orders/export/', OrdersExportView, name='orders-export')
+v1.register('payments', PaymentViewSet, basename='payments')
+v1.register('payments/summary/', PaymentsSummaryView, name='payments-summary')
+v1.register('users', UserViewSet, basename='users')
+v1.register('schema/', v1.schema_view(prefix='api/v1/'), name='v1-schema')
+```
+
+`api/urls.py` — the Aggregation Root — mounts it:
+
+```python
+from api.v1.registry import v1
+
+urlpatterns = [
+    path('api/v1/', include(v1.urls)),
+]
+```
+
+Now point the project's real root `urls.py` at it, appended after everything already there:
+
+```diff
+     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
+     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
++    # apiver's Aggregation Root (ADR 0007 item 2), appended, not substituted:
++    # everything above stays exactly where it was before adopting apiver.
++    path("", include("api.urls")),
+ ]
+```
+
+## 4. Verify the base version
+
+```console
+$ DJANGO_SETTINGS_MODULE=config.settings uv run python manage.py check
+System check identified no issues (0 silenced).
+
+$ uv run pytest -q
+25 passed, 3 warnings in 0.34s
+```
+
+All 25 pre-existing tests pass **unmodified** — they hit the original, unversioned paths
+(`/api/users/`, `/api/legacy-invoices/`, ...), which `init` never touched. The new surface lives
+at `/api/v1/...`, reachable a second way:
+
+```console
+$ curl -s localhost:8000/api/v1/schema/ | head -c 40
+$ curl -s localhost:8000/api/v1/docs/ -o /dev/null -w '%{http_code}\n'
+200
+```
+
+Both resolve to their own, version-qualified route names (`v1-schema`, `v1-docs`) rather than
+colliding with the pre-existing `schema`/`docs` names still mounted alongside them — see
+`getting-started.md`'s "The base version's schema and docs routes are automatically renamed" for
+why that matters.
+
+## 5. Mount v2
+
+```diff
+-APIVER_VERSIONS = ["v1"]
++APIVER_VERSIONS = ["v1", "v2"]
+```
+
+```console
+$ uv run apiver --settings config.settings mount v2 --from v1
+wrote .../reference/api/v2/registry.py
+wrote .../reference/api/urls.py
+apiver: add 'v2' to APIVER_VERSIONS to make it live.
+```
+
+The generated `api/v2/registry.py` is deliberately minimal — `derive()` plus schema/docs, nothing
+resource-specific yet:
+
+```python
+from api.v1.registry import v1
+
+v2 = v1.derive('v2')
+v2.override('schema/', v2.schema_view(prefix='api/v2/'), name='schema')
+v2.override('docs/', v2.docs_view(), name='docs')
+```
+
+Note there's no hand-written Swagger/Redoc subclass needed here (an earlier draft of this project
+needed one) — `docs_view()` already resolves the right, namespaced schema route for whichever
+version calls it.
+
+## 6. Author the breaking changes
+
+This is the part `mount` never does for you — the six catalogue rows (issue #22's "awkward or
+schema-invisible" set) that a prospective adopter most needs to see, all landing on `reference/`'s
+existing `users`/`orders`/`payments`/`webhooks`/`legacy-invoices` resources.
+
+Create `api/v2/serializers.py`:
+
+```python
+from drf_spectacular.utils import extend_schema_field
+from rest_framework import serializers
+
+from orders.serializers import OrderSerializer
+from payments.serializers import PaymentSerializer
+from users.serializers import UserSerializer
+
+
+class CardSchemaV2(serializers.Serializer):
+    """Not registered anywhere — exists only so `@extend_schema_field` below can
+    give `card` a proper nested-object schema instead of drf-spectacular's opaque
+    string fallback for a SerializerMethodField it can't infer a return type for."""
+
+    last4 = serializers.CharField()
+    brand = serializers.CharField()
+
+
+class UserSerializerV2(UserSerializer):
+    """V2 renames `full_name` to `display_name` (catalogue row 5) — the field-add
+    + field-remove idiom; there is no dedicated rename primitive. A schema diff
+    between v1 and v2 reports this as one field deleted, one added, even though
+    it's the same underlying attribute."""
+
+    display_name = serializers.CharField(source="full_name")
+
+    class Meta(UserSerializer.Meta):
+        fields = ["id", "username", "email", "display_name", "is_active"]
+
+
+class OrderSerializerV2(OrderSerializer):
+    """V2 drops `status` entirely (catalogue row 6) — Meta.fields surgery, the
+    canonical removal idiom. `status = None` would raise: apiver refuses that
+    shortcut outright rather than leaving it to silently survive."""
+
+    class Meta(OrderSerializer.Meta):
+        fields = [name for name in OrderSerializer.Meta.fields if name != "status"]
+
+
+class PaymentSerializerV2(PaymentSerializer):
+    """Two independent V2 changes on the same resource:
+
+    - `card_last4`/`card_brand` collapse into a nested `card` object (catalogue
+      row 9, flat<->nested restructuring) — the flat fields drop out of
+      Meta.fields, a SerializerMethodField assembles the nested read shape, and
+      create/update translate the nested write shape back to the two flat model
+      fields by hand.
+    - `get_display_amount`'s output format changes (catalogue row 10) — still a
+      SerializerMethodField, so this produces *no* schema delta at all; the only
+      way to catch it is to call the endpoint and read the body.
+    """
+
+    card = serializers.SerializerMethodField()
+
+    class Meta(PaymentSerializer.Meta):
+        fields = ["id", "amount", "currency", "status", "card", "display_amount", "created_at"]
+
+    @extend_schema_field(CardSchemaV2)
+    def get_card(self, obj):
+        return {"last4": obj.card_last4, "brand": obj.card_brand}
+
+    def get_display_amount(self, obj):
+        return f"${obj.amount / 100:.2f}"
+
+    def _card_fields(self):
+        card = self.initial_data.get("card") or {}
+        return {"card_last4": card.get("last4", ""), "card_brand": card.get("brand", "")}
+
+    def create(self, validated_data):
+        validated_data.update(self._card_fields())
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if "card" in self.initial_data:
+            validated_data.update(self._card_fields())
+        return super().update(instance, validated_data)
+```
+
+Create `api/v2/views.py`:
+
+```python
+from orders.views import OrderViewSet
+from payments.views import PaymentViewSet
+from users.views import UserViewSet
+from webhooks.views import WebhookEndpointViewSet
+
+from .serializers import OrderSerializerV2, PaymentSerializerV2, UserSerializerV2
+
+
+class UserViewSetV2(UserViewSet):
+    serializer_class = UserSerializerV2
+
+
+class OrderViewSetV2(OrderViewSet):
+    serializer_class = OrderSerializerV2
+
+
+class PaymentViewSetV2(PaymentViewSet):
+    """`refund` drops out entirely (catalogue row 14b). `refund = None` is the
+    correct idiom here — DRF's `get_extra_actions()` reads the class attribute at
+    router-registration time and simply omits a `None`d action, unlike the
+    `field = None` footgun on a serializer."""
+
+    serializer_class = PaymentSerializerV2
+    refund = None
+
+
+class WebhookEndpointViewSetV2(WebhookEndpointViewSet):
+    """Behavior is unchanged — exists only so the URL-prefix move (catalogue row
+    13, below) has a version-suffixed class to register at the new key. apiver's
+    suffix rule applies even to a class whose only change is where it's mounted —
+    there's no "reuse the parent's class unchanged" escape hatch."""
+```
+
+Then extend the `api/v2/registry.py` `mount` already wrote — add resource-level changes below the
+two lines already there:
+
+```diff
+ from api.v1.registry import v1
+ 
++from .views import (
++    OrderViewSetV2,
++    PaymentViewSetV2,
++    UserViewSetV2,
++    WebhookEndpointViewSetV2,
++)
++
+ v2 = v1.derive('v2')
+ v2.override('schema/', v2.schema_view(prefix='api/v2/'), name='schema')
+ v2.override('docs/', v2.docs_view(), name='docs')
++
++# Field rename (row 5), field removal (row 6), and the combined nested-restructure
++# + SerializerMethodField-output-change resource (rows 9, 10) — see
++# api/v2/serializers.py. @action removal (row 14b) — see api/v2/views.py.
++v2.override("users", UserViewSetV2, basename="users")
++v2.override("orders", OrderViewSetV2, basename="orders")
++v2.override("payments", PaymentViewSetV2, basename="payments")
++
++# Whole-resource removal (row 12) — legacy-invoices does not exist in v2 or later.
++v2.remove("legacy-invoices")
++
++# URL prefix change (row 13) — no first-class "move" primitive: remove the old
++# key, register the same (version-suffixed) handler under the new one.
++v2.remove("integrations/webhooks")
++v2.register("webhooks", WebhookEndpointViewSetV2, basename="webhooks")
+```
+
+## 7. Verify again
+
+```console
+$ DJANGO_SETTINGS_MODULE=config.settings uv run python manage.py check
+System check identified some issues:
+WARNINGS:
+?: (apiver.W001) .../apiver.toml is stale or missing — run `apiver manifest` to regenerate it.
+
+$ DJANGO_SETTINGS_MODULE=config.settings uv run apiver manifest
+wrote .../reference/apiver.toml
+
+$ DJANGO_SETTINGS_MODULE=config.settings uv run python manage.py check
+System check identified no issues (0 silenced).
+
+$ uv run pytest -q
+25 passed, 3 warnings in 0.34s
+```
+
+The 25 pre-existing tests still pass unmodified — v1's surface is untouched by any of this.
+`apiver versions` confirms the composition without booting the project at all:
+
+```console
+$ DJANGO_SETTINGS_MODULE=config.settings uv run apiver versions
+v1 (base version) — mutable, live
+  routes: 22 defined, 0 inherited
+    ...
+v2 (derived from v1) — mutable, live
+  routes: 11 defined, 8 inherited
+    defines:  ^docs/\Z
+    defines:  ^orders/$
+    defines:  ^orders/(?P<pk>[^/.]+)/$
+    defines:  ^payments/$
+    defines:  ^payments/(?P<pk>[^/.]+)/$
+    defines:  ^schema/\Z
+    defines:  ^users/$
+    defines:  ^users/(?P<pk>[^/.]+)/$
+    defines:  ^webhooks/$
+    defines:  ^webhooks/(?P<pk>[^/.]+)/$
+    defines:  ^webhooks/(?P<pk>[^/.]+)/test-delivery/$
+    inherits from v1: ^addresses/$
+    inherits from v1: ^addresses/(?P<pk>[^/.]+)/$
+    ...
+```
+
+v2 defines exactly the 3 overridden resources (with their inherited-from-parent routes gone —
+`payments` drops `refund`, `orders`/`users` still have both their routes but with the changed
+serializer) plus `webhooks` at its new prefix and its own `docs`/`schema`; `legacy-invoices` and
+`integrations/webhooks` don't appear under v2 at all. Everything else (`addresses`,
+`notifications`, `healthz`) is inherited from v1 unchanged.
+
+### Confirming each row actually works, not just composes
+
+`manage.py check` proves the routing composes; it says nothing about response bodies. Exercised by
+hand against a migrated dev database:
+
+```pycon
+>>> c.get('/api/v2/users/').json()['results'][0]
+{'id': 1, 'username': 'ada', 'email': 'ada@example.com', 'display_name': 'Ada Lovelace', 'is_active': True}
+>>> c.get('/api/v2/orders/').json()['results'][0]
+{'id': 1, 'reference': 'ORD-1'}                          # no 'status'
+>>> c.get('/api/v2/payments/').json()['results'][0]
+{'id': 1, 'amount': 1050, 'currency': 'USD', 'status': 'pending',
+ 'card': {'last4': '4242', 'brand': 'visa'}, 'display_amount': '$10.50', 'created_at': '...'}
+>>> c.get('/api/v2/legacy-invoices/').status_code
+404
+>>> c.get('/api/v2/integrations/webhooks/').status_code
+404
+>>> c.get('/api/v2/webhooks/').status_code
+200
+>>> c.post('/api/v2/payments/1/refund/').status_code
+404
+>>> c.get('/api/v1/users/').json()['results'][0]          # v1 unaffected throughout
+{'id': 1, 'username': 'ada', 'email': 'ada@example.com', 'full_name': 'Ada Lovelace', 'is_active': True}
+```
+
+## Where this diverges from `getting-started.md`
+
+- `getting-started.md`'s step 6 shows a `PaymentSerializerV2`-style example with an illustrative
+  `override("payments", ...)` — this tutorial's version is the same idiom, landed for real on
+  `reference/`'s actual `payments`/`orders`/`users`/`webhooks` resources, plus the two
+  whole-resource changes (`remove("legacy-invoices")`, the `webhooks` prefix move) the generic
+  guide doesn't have a concrete resource to hang on.
+- `getting-started.md`'s "If init refuses" section lists failure modes in the abstract;
+  `reference/` never triggers any of them (every route classified cleanly on the first `init`
+  run), so this tutorial has nothing to add there.
+- Not attempted here: deprecating v1 once v2 ships (`Version.deprecate(sunset=...)`) or declaring
+  a `stable` alias pointing at v2 (`apiver alias`, `getting-started.md` step 8) — both are real
+  library capabilities, just outside issue #22's six-row catalogue scope. Either is a natural next
+  exercise against this same `reference/` state.
