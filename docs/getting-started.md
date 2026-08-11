@@ -130,7 +130,7 @@ with a specific diagnostic message):
 Any of these can be registered by hand afterwards instead — `migrate` covers the common case, not
 every case.
 
-## 4. Verify the base version
+## 5. Verify the base version
 
 ```console
 $ DJANGO_SETTINGS_MODULE=config.settings python manage.py check
@@ -140,7 +140,7 @@ $ DJANGO_SETTINGS_MODULE=config.settings python manage.py test   # or pytest
 `manage.py check` runs apiver's own system checks — a mis-shaped version directory or a stale
 manifest surfaces here, not at request time.
 
-## 5. Author a second version
+## 6. Author a second version
 
 An authored (non-base) version is **hand-written**, not generated — `migrate` only ever adopts the
 Base Version. Create the flat layout apiver's layout check requires:
@@ -162,8 +162,6 @@ generated schema.
 `registry.py` looks like:
 
 ```python
-from apiver.drf import Version
-
 from api.v1.registry import v1
 from .serializers import PaymentSerializerV2
 from .views import PaymentViewSetV2
@@ -171,11 +169,7 @@ from .views import PaymentViewSetV2
 v2 = v1.derive("v2")
 v2.override("payments", PaymentViewSetV2, basename="payments")
 v2.remove("legacy-invoices")
-v2.register(
-    "schema",
-    v2.schema_view(prefix="api/v2/"),
-    name="schema-v2",
-)
+v2.override("schema/", v2.schema_view(prefix="api/v2/"), name="schema")
 ```
 
 `override()` replaces a registration's *entire* route set — there's no way to override just one
@@ -183,7 +177,23 @@ action and inherit the rest, so a narrower override drops whatever routes the pa
 had that the child's doesn't re-declare. `remove()` only stops *this* version (and anything derived
 from it) from serving a key; the parent keeps serving it unchanged.
 
-## 6. Mount the new version
+Two things that aren't obvious the first time through:
+
+- **The schema route needs `override()`, not `register()`.** `migrate` already registered `schema/`
+  (and `docs/`) on the Base Version, and every authored version inherits both by default — so giving
+  v2 its own, correctly-scoped schema document means *replacing* that inherited registration, the
+  same as any other changed resource. `register()` would raise ("already registered on … or one of
+  its ancestors") since the key already resolves through the parent.
+- **Reusing a handler completely unchanged still needs a version-suffixed subclass.** The
+  class-name-suffix rule (above) is enforced on every class-based `register()`/`override()` call on
+  an authored version, with no exception for "the class didn't actually change" — this bites most
+  often when moving a resource's URL (its handler is identical, only the mount key differs) or
+  re-registering a third-party class-based view (e.g. drf-spectacular's own `SpectacularSwaggerView`)
+  that this project doesn't own and can't rename. The fix is the same either way: a trivial local
+  subclass that exists only to carry the suffix, e.g.
+  `class SpectacularSwaggerViewV2(SpectacularSwaggerView): pass`.
+
+## 7. Mount the new version
 
 ```console
 $ DJANGO_SETTINGS_MODULE=config.settings apiver mount v2
@@ -196,7 +206,7 @@ touches `settings.py` — add the new name to `APIVER_VERSIONS` by hand:
 APIVER_VERSIONS = ["v1", "v2"]
 ```
 
-## 7. Verify again
+## 8. Verify again
 
 ```console
 $ DJANGO_SETTINGS_MODULE=config.settings python manage.py check
@@ -212,8 +222,42 @@ project at all.
 
 ## Friction found while dogfooding this guide (issue #22)
 
+Every one of these was hit for real while converting `reference/`, then fixed in this guide's
+wording (not routed around) — per issue #22's instruction to follow the guide verbatim and record
+what doesn't work the first time.
+
 - **Django-version mismatch at adoption.** A project pinned ahead of apiver's supported Django
   range fails at dependency resolution with a fairly clear `uv` error, but nothing in apiver itself
-  says "check your Django version" up front — worth a line in this guide's Prerequisites (added
-  above) rather than a step someone has to discover by resolver failure.
+  says "check your Django version" up front — now called out in this guide's Prerequisites rather
+  than a step someone has to discover by resolver failure.
+- **The root package has to exist before `migrate` can write into it.** `_resolve_target_dir` only
+  ever imports the *parent* of the path it's about to create, so a brand-new adoption's
+  `APIVER_ROOT_DIR` package doesn't exist yet by definition. The error
+  (`ModuleNotFoundError: No module named 'api'`) points at the right name but not at the right fix —
+  now step 3 above, rather than something only discoverable by reading `migrate`'s source or its
+  test fixtures (which pre-create it silently).
+- **The bare `apiver` CLI needs `PYTHONPATH` set explicitly.** `manage.py` sets
+  `DJANGO_SETTINGS_MODULE` for you via `os.environ.setdefault`, which papers over the fact that
+  Django itself never puts the project root on `sys.path` — `manage.py` works anyway because it's
+  invoked *from* the project root, which Python already adds for a directly-executed script. The
+  `apiver` entry point is installed into `.venv/bin` and has no equivalent trick, so
+  `ModuleNotFoundError: No module named 'config'` is the first thing anyone doing this for the first
+  time will see.
+- **Adoption changes every URL, immediately.** Not a bug, but the single largest mechanical
+  consequence of running `migrate` at all: every hard-coded `/api/<resource>/` in tests, clients, or
+  frontend code needs to become `/api/v1/<resource>/` in the same pass. Twenty-five tests across five
+  files needed this in `reference/`'s case.
+- **The version-suffix rule has no "but it didn't actually change" exception**, and this surfaces in
+  two non-obvious places: overriding the *inherited* schema/docs routes (which need `override()`,
+  since `migrate` already registered them on the Base Version), and re-registering a handler at a new
+  key with identical behavior (a URL-prefix move) or a third-party class this project doesn't own
+  (`SpectacularSwaggerView`). Both need a trivial version-suffixed subclass purely to satisfy the
+  rule — now called out explicitly in step 6 above rather than left to the (accurate, but easy to
+  read as "did I do something wrong?") `ValueError` message.
+- **A `SerializerMethodField` with no return-type hint degrades drf-spectacular's schema to an opaque
+  `string`.** Not an apiver behavior at all — plain drf-spectacular — but relevant here because this
+  project doubles as the schema-correctness demo: a restructured nested field (catalogue row 9)
+  deserves a real object schema, not `string`, so `api/v2/serializers.py`'s `get_card` carries an
+  `@extend_schema_field` decorator pointing at a small, unregistered `Serializer` used only for its
+  shape.
 </content>

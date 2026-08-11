@@ -6,7 +6,9 @@ rewrites an existing line."""
 from django.urls import include, path
 
 from api.v1.registry import v1
+from api.v2.registry import v2
 
 urlpatterns = [
     path('api/v1/', include(v1.urls)),
+    path('api/v2/', include(v2.urls)),
 ]
