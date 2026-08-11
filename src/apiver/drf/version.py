@@ -1,8 +1,13 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
+from functools import wraps
 from typing import Any
 
-from django.urls import include, path
+from django.http import JsonResponse
+from django.urls import URLPattern, include, path
+from django.utils import timezone
+from django.utils.http import http_date
 from drf_spectacular.views import SpectacularAPIView
 from rest_framework.routers import BaseRouter, SimpleRouter
 from rest_framework.viewsets import ViewSetMixin
@@ -127,6 +132,8 @@ class Version:
         self._registrations: dict[str, Registration] = {}
         self._removed: set[str] = set()
         self._frozen = False
+        self._deprecated = False
+        self._sunset_at: datetime | None = None
         self._own_build_cache: tuple[list, dict[str, Route]] | None = None
         self._schema_view_cache: Any | None = None
 
@@ -288,6 +295,46 @@ class Version:
         self._frozen = True
         return self
 
+    def deprecate(self, *, sunset: datetime) -> "Version":
+        """Marks this Version deprecated with a sunset date (ticket 13, ADR
+        0002 item 5).
+
+        Lives on the `Version` object, never in settings or the manifest, so
+        there is exactly one source of truth for a Version's lifecycle. Takes
+        effect through the mount-time wrapper `urls` builds: every response
+        from this Version's mount carries `Deprecation: true` and `Sunset:
+        <HTTP-date>`, and requests made after `sunset` (evaluated on the wall
+        clock at request time, not here) get `410 Gone` instead of reaching
+        the view. Independent of `freeze()` — deprecation is a lifecycle
+        fact, not a mutability one."""
+        self._deprecated = True
+        self._sunset_at = sunset
+        return self
+
+    def _gate(self, callback: Any) -> Any:
+        """Wrap a callback with this Version's deprecation/sunset gating.
+
+        Closes directly over `self` rather than reverse-engineering which
+        Version served a request from `request.resolver_match` — the latter
+        breaks specifically for the unnamespaced base Version (ticket 13).
+        `@wraps` copies the original callback's `__dict__`, which is where
+        DRF's `.as_view()` stashes `cls`/`actions`/`initkwargs` — without
+        that, drf-spectacular's schema generation (which walks this same
+        `urls`) couldn't introspect the wrapped view.
+        """
+
+        @wraps(callback)
+        def gated(request, *args, **kwargs):
+            if self._sunset_at is not None and timezone.now() >= self._sunset_at:
+                return JsonResponse({"detail": "This API version has been sunset."}, status=410)
+            response = callback(request, *args, **kwargs)
+            response["Deprecation"] = "true"
+            if self._sunset_at is not None:
+                response["Sunset"] = http_date(self._sunset_at.timestamp())
+            return response
+
+        return gated
+
     def _build_own(self) -> tuple[list, dict[str, Route]]:
         if self._own_build_cache is not None:
             return self._own_build_cache
@@ -383,6 +430,15 @@ class Version:
         # explicit namespace= to make `reverse("v2:...")` work (ADR 0002
         # item 7).
         patterns, _ = self._build()
+        if self._deprecated:
+            # A fresh list of patterns wrapping this Version's own callbacks,
+            # not a mutation of `_build()`'s cache: the same route inherited
+            # by a non-deprecated child (or reused unchanged by the parent's
+            # own resolution table) must not pick up this Version's gating.
+            patterns = [
+                URLPattern(pattern.pattern, self._gate(pattern.callback), pattern.default_args, pattern.name)
+                for pattern in patterns
+            ]
         app_name = self.name if self.parent is not None else None
         return patterns, app_name
 
