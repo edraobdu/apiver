@@ -70,7 +70,6 @@ def test_migrate_writes_registry_py_the_aggregation_root_and_the_manifest(tmp_pa
         "from tests.fixtures_migrate.views import "
         "GadgetSummaryView, GadgetViewSet, HealthzView, WebhookViewSet, WidgetViewSet, ping"
     ) in source
-    assert "from drf_spectacular.views import SpectacularSwaggerView" in source
     assert "v1 = Version('v1')" in source
     assert "v1.register('widgets', WidgetViewSet, basename='widgets')" in source
     assert "v1.register('gadgets', GadgetViewSet, basename='gadgets')" in source
@@ -83,14 +82,16 @@ def test_migrate_writes_registry_py_the_aggregation_root_and_the_manifest(tmp_pa
     # version's own absolute mount, so a sibling version can never leak in.
     assert "v1.register('schema/', v1.schema_view(prefix='api/v1/'), name='v1-schema')" in source
     assert "SpectacularAPIView" not in source
-    # ticket 22: SpectacularSwaggerView is rewired too — its own registration
-    # name is qualified ("v1-docs", not the bare, pre-existing "docs") and its
-    # url_name is repointed at v1's own qualified schema name, so it can't
-    # collide with (or silently resolve to) a same-named route kept mounted
-    # elsewhere in the project.
-    assert (
-        "v1.register('docs/', SpectacularSwaggerView.as_view(url_name='v1-schema'), name='v1-docs')"
-    ) in source
+    # ticket 22: SpectacularSwaggerView is rewired too, through v1.docs_view()
+    # (mirroring v1.schema_view() above) rather than a bare .as_view() call —
+    # its own registration name is qualified ("v1-docs", not the bare,
+    # pre-existing "docs") and docs_view() points it at v1's own qualified
+    # schema name internally, so it can't collide with (or silently resolve
+    # to) a same-named route kept mounted elsewhere in the project. No import
+    # needed either: the discovered class is the exact, unmodified default
+    # docs_view() already falls back to.
+    assert "v1.register('docs/', v1.docs_view(), name='v1-docs')" in source
+    assert "SpectacularSwaggerView" not in source
     # The schema registration is emitted last: schema_view() snapshots
     # self.urls the moment it's called, so every other route must already
     # be registered for the generated schema to describe the whole surface.
