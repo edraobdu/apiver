@@ -1,4 +1,7 @@
+from datetime import timedelta
+
 from django.urls import include, path
+from django.utils import timezone
 
 from apiver.drf import Alias, Version
 
@@ -38,6 +41,27 @@ v1.freeze()
 # itself (ticket 12), so nothing below has to change.
 stable = Alias("stable", target=v2)
 
+# Ticket 13: deprecation/sunset gating, kept off v1/v2/v3 so it can't
+# interact with their own tests. `deprecated_base` is a Version with no
+# parent, proving gating isn't special-cased away from the unnamespaced base
+# (the ticket's explicit worry about `request.resolver_match`-based
+# approaches). `sunset_clock` isolates one fixed sunset instant so a test can
+# move the wall clock across it and prove gating reads the live object on
+# every request rather than a value computed once. `unmounted` is registered
+# but never given a urlpatterns entry, standing in for "version not mounted".
+DEPRECATED_BASE_SUNSET = timezone.now() + timedelta(days=365)
+deprecated_base = Version("deprecated-base")
+deprecated_base.register("ping", PingViewSet, basename="ping")
+deprecated_base.deprecate(sunset=DEPRECATED_BASE_SUNSET)
+
+SUNSET_CLOCK_INSTANT = timezone.now() + timedelta(days=1)
+sunset_clock = Version("sunset-clock")
+sunset_clock.register("ping", PingViewSet, basename="ping")
+sunset_clock.deprecate(sunset=SUNSET_CLOCK_INSTANT)
+
+unmounted = Version("unmounted")
+unmounted.register("ping", PingViewSet, basename="ping")
+
 urlpatterns = [
     path("api/v1/", include(v1.urls)),
     path("api/v2/", include(v2.urls)),
@@ -47,4 +71,6 @@ urlpatterns = [
     path("api/v2/schema/", v2.schema_view(prefix="api/v2/"), name="v2-schema"),
     path("api/v3/schema/", v3.schema_view(prefix="api/v3/"), name="v3-schema"),
     path("api/stable/schema/", stable.schema_view(), name="stable-schema"),
+    path("api/deprecated-base/", include(deprecated_base.urls)),
+    path("api/sunset-clock/", include(sunset_clock.urls)),
 ]
