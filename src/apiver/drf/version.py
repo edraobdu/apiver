@@ -12,6 +12,8 @@ from drf_spectacular.views import SpectacularAPIView
 from rest_framework.routers import BaseRouter, SimpleRouter
 from rest_framework.viewsets import ViewSetMixin
 
+from .fields import check_no_removed_fields
+
 
 class CompositionError(RuntimeError):
     """The patterns apiver built don't match what its registrations intended.
@@ -197,6 +199,17 @@ class Version:
                 f"{suffix!r}."
             )
 
+    def _check_no_removed_fields(self, handler: Any) -> None:
+        """Refuse a handler whose `serializer_class` sets an inherited field
+        to `None` (ticket 14, ADR 0006 item 1) — DRF's silent footgun where
+        the field can survive removal in both the response body and the
+        schema. Checked here, alongside `_check_suffix`, because register()
+        and override() are the only points where apiver ever sees the
+        handler class."""
+        serializer_class = getattr(handler, "serializer_class", None)
+        if serializer_class is not None:
+            check_no_removed_fields(serializer_class)
+
     def register(
         self,
         key: str,
@@ -217,6 +230,7 @@ class Version:
 
         kind = _classify(handler)
         self._check_suffix("registered", handler)
+        self._check_no_removed_fields(handler)
         if kind == "view":
             if name is None:
                 raise TypeError(
@@ -255,6 +269,7 @@ class Version:
 
         kind = _classify(handler)
         self._check_suffix("overridden", handler)
+        self._check_no_removed_fields(handler)
         if kind == "view":
             if name is None:
                 raise TypeError(
