@@ -13,6 +13,7 @@ INSTALLED_APPS = [
     "django.contrib.auth",
     "rest_framework",
     "drf_spectacular",
+    "apiver",
     "users",
     "payments",
     "orders",
@@ -53,3 +54,8 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "A plain pre-apiver DRF API — the messy 'before' state.",
     "VERSION": "1.0.0",
 }
+
+APIVER_ROOT_DIR = "api"
+APIVER_ROOT_PREFIX = "api/"
+APIVER_BASE_VERSION = "v1"
+APIVER_VERSIONS = ["v1"]

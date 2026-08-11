@@ -30,7 +30,7 @@ def test_pagination_uses_the_distinct_cursor_style_not_the_project_default(clien
     for i in range(7):
         Notification.objects.create(user=user, verb=f"event.{i}")
 
-    response = client.get("/api/notifications/")
+    response = client.get("/api/v1/notifications/")
 
     assert response.status_code == 200
     # CursorPagination's response shape ("next"/"previous", no "count") is the
@@ -45,7 +45,7 @@ def test_mark_all_read_updates_every_unread_notification(client, user):
     Notification.objects.create(user=user, verb="order.shipped", read=False)
     Notification.objects.create(user=user, verb="order.delivered", read=True)
 
-    response = client.post("/api/notifications/mark-all-read/")
+    response = client.post("/api/v1/notifications/mark-all-read/")
 
     assert response.status_code == 200
     assert response.data == {"marked": 2}
@@ -57,7 +57,7 @@ def test_mark_all_read_route_is_not_swallowed_by_the_detail_pattern(client, user
     """Same hazard class as payments/summary and orders/export, now proven for a
     plain function view sitting in front of a SimpleRouter instead of a ViewSet
     action in front of a Default/SimpleRouter."""
-    response = client.post("/api/notifications/mark-all-read/")
+    response = client.post("/api/v1/notifications/mark-all-read/")
 
     assert response.status_code == 200
     assert "marked" in response.data

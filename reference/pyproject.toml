@@ -4,7 +4,8 @@ version = "0.0.0"
 description = "A plain, pre-apiver DRF project — the messy 'before' state apiver's library will be built against, one capability at a time."
 requires-python = ">=3.12"
 dependencies = [
-    "django~=6.1",
+    "apiver",
+    "django~=5.2",
     "djangorestframework~=3.18",
     "drf-spectacular~=0.30",
 ]
@@ -14,6 +15,9 @@ dev = [
     "pytest>=8.0",
     "pytest-django>=4.9",
 ]
+
+[tool.uv.sources]
+apiver = { path = "..", editable = true }
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
