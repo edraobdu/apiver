@@ -128,6 +128,7 @@ class Version:
         self._removed: set[str] = set()
         self._frozen = False
         self._own_build_cache: tuple[list, dict[str, Route]] | None = None
+        self._schema_view_cache: Any | None = None
 
     def derive(self, name: str) -> "Version":
         """Return a new Version whose parent is `self`.
@@ -388,7 +389,7 @@ class Version:
     def schema_view(
         self,
         *,
-        prefix: str,
+        prefix: str | None = None,
         title: str | None = None,
         description: str | None = None,
         version: str | None = None,
@@ -406,7 +407,24 @@ class Version:
         so sibling versions' routes can never leak in and drf-spectacular's
         `(path, method)`-keyed dedup can never collide across versions (ADR
         0002 Consequences).
+
+        Cached after the first call, and every later call — regardless of
+        arguments — returns that exact same view object. This is what lets
+        `Alias.schema_view()` (ticket 12) proxy straight through to a
+        target's `schema_view()` with no arguments of its own and still get
+        back the identical instance the target mounted for itself, rather
+        than building a second, independently-generated document. `prefix`
+        is only required on the first, cache-populating call.
         """
+        if self._schema_view_cache is not None:
+            return self._schema_view_cache
+
+        if prefix is None:
+            raise TypeError(
+                f"version {self.name!r} has no schema view yet — the first "
+                "schema_view() call must pass prefix= (ADR 0002 Consequences)."
+            )
+
         mount = [path(prefix, include(self.urls))]
         custom_settings = {"SCHEMA_PATH_PREFIX": "/" + prefix.strip("/")}
         if title is not None:
@@ -414,7 +432,8 @@ class Version:
         if description is not None:
             custom_settings["DESCRIPTION"] = description
         custom_settings["VERSION"] = version if version is not None else self.name
-        return SpectacularAPIView.as_view(patterns=mount, custom_settings=custom_settings)
+        self._schema_view_cache = SpectacularAPIView.as_view(patterns=mount, custom_settings=custom_settings)
+        return self._schema_view_cache
 
 
 class Alias:
@@ -430,17 +449,18 @@ class Alias:
     Python import time before `Alias` ever runs — there is no request-time
     "alias points nowhere" case to gate here.
 
-    The alias's schema route is not built by this class: reusing the
-    target's already-built `SpectacularAPIView` instance — not calling
-    `target.schema_view()` a second time — is what keeps it from becoming a
-    second generated document. The caller mounts the same view object
-    returned by the target's own `schema_view()` call at the alias's prefix
-    too (see the `schema_view()` docstring, and `tests/testapp/urls.py`).
+    `schema_view()` is a plain proxy to the target's own cached
+    `schema_view()` (see that method's docstring) — promoting the alias to a
+    new target only ever means editing `target=` here; nothing at the
+    alias's own mount site has to change.
     """
 
     def __init__(self, name: str, *, target: Version):
         self.name = name
         self.target = target
+
+    def schema_view(self):
+        return self.target.schema_view()
 
     @property
     def urls(self):

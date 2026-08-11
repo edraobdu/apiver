@@ -33,11 +33,10 @@ v3.remove("ping")
 v1.freeze()
 
 # "stable" is a movable name, re-pointed by editing target= — today it names
-# v2. Its schema route reuses v2's own already-built SpectacularAPIView
-# instance (v2_schema below), never a second call to v2.schema_view()
-# (ticket 12).
+# v2. Promoting it to v3 later means changing only this line: its
+# schema_view() proxies to whatever its current target already built for
+# itself (ticket 12), so nothing below has to change.
 stable = Alias("stable", target=v2)
-v2_schema = v2.schema_view(prefix="api/v2/")
 
 urlpatterns = [
     path("api/v1/", include(v1.urls)),
@@ -45,7 +44,7 @@ urlpatterns = [
     path("api/v3/", include(v3.urls)),
     path("api/stable/", stable.urls),
     path("api/v1/schema/", v1.schema_view(prefix="api/v1/"), name="v1-schema"),
-    path("api/v2/schema/", v2_schema, name="v2-schema"),
+    path("api/v2/schema/", v2.schema_view(prefix="api/v2/"), name="v2-schema"),
     path("api/v3/schema/", v3.schema_view(prefix="api/v3/"), name="v3-schema"),
-    path("api/stable/schema/", v2_schema, name="stable-schema"),
+    path("api/stable/schema/", stable.schema_view(), name="stable-schema"),
 ]
