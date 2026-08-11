@@ -76,3 +76,42 @@ def test_alias_schema_route_reuses_the_targets_schema_document_verbatim(client):
     assert stable_doc == v2_doc
     assert any(path.startswith("/api/v2/") for path in stable_doc["paths"])
     assert not any(path.startswith("/api/stable/") for path in stable_doc["paths"])
+
+
+def test_alias_schema_view_proxies_to_the_targets_cached_instance():
+    v1 = Version("v1")
+    v2 = v1.derive("v2")
+    v2_view = v2.schema_view(prefix="api/v2/")
+    stable = Alias("stable", target=v2)
+
+    assert stable.schema_view() is v2_view
+
+
+def test_repointing_an_alias_changes_which_cached_schema_view_it_proxies_to():
+    v1 = Version("v1")
+    v2 = v1.derive("v2")
+    v3 = v2.derive("v3")
+    v2_view = v2.schema_view(prefix="api/v2/")
+    v3_view = v3.schema_view(prefix="api/v3/")
+    stable = Alias("stable", target=v2)
+    assert stable.schema_view() is v2_view
+
+    stable.target = v3
+
+    assert stable.schema_view() is v3_view
+
+
+def test_schema_view_is_cached_so_a_second_call_returns_the_identical_object():
+    v1 = Version("v1")
+
+    first = v1.schema_view(prefix="api/v1/")
+    second = v1.schema_view(prefix="api/v1/")
+
+    assert first is second
+
+
+def test_schema_view_without_prefix_before_any_call_raises():
+    v1 = Version("v1")
+
+    with pytest.raises(TypeError):
+        v1.schema_view()
