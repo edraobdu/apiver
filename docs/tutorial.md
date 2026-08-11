@@ -1,20 +1,22 @@
-# Tutorial: converting `reference/` from scratch
+# Adopting apiver into an existing project
 
-This is [`getting-started.md`](getting-started.md), walked literally against `reference/` — every
-file it touches, every command it runs, and the actual output each one produced. `reference/` is
-kept out of version control on purpose (issue #22): it's meant to stay the "before" fixture so it
-can be adopted by hand, not carried pre-converted. Follow this tutorial step by step against a
-clean `reference/` checkout to reproduce the same flow yourself; nothing here does anything
-`getting-started.md` doesn't already describe in general terms.
+Walks a project that already has a working DRF API through adopting apiver: installing it,
+running `apiver init` to adopt the existing API as the Base Version, then authoring and mounting a
+second version as a Delta. Every step below was actually run against `reference/` (issue #22) —
+commands, output and generated code are real, not illustrative. `reference/` itself is kept out of
+version control on purpose, so it stays a clean "before" fixture; run this yourself against a
+fresh checkout to reproduce it.
 
-Run every command from `reference/` itself, using `uv run` (or an activated `.venv`) unless noted
-otherwise.
+Run every command from `reference/`, using `uv run` (or an activated `.venv`).
+
+## Prerequisites
+
+- `django~=5.2`, `djangorestframework~=3.18`, `drf-spectacular~=0.30`.
+- An API reachable by walking `ROOT_URLCONF`: plain `path()` entries, router-registered ViewSets
+  with explicit `basename=`, at most one drf-spectacular `SpectacularAPIView`. `apiver init`
+  refuses anything it can't classify — see "If init refuses" below.
 
 ## 1. Install apiver
-
-`reference/pyproject.toml` already pins `django~=5.2` to match apiver's own supported range (a
-`uv` resolver failure otherwise — apiver's Prerequisites in `getting-started.md`). Add apiver
-itself as an editable path dependency:
 
 ```diff
  dependencies = [
@@ -42,7 +44,11 @@ Installed 1 package in 1ms
  ~ apiver==0.1.0.dev0 (from file:///.../apiver)
 ```
 
-Then add `"apiver"` to `config/settings.py`'s `INSTALLED_APPS`, right after `drf_spectacular`:
+`reference/pyproject.toml` already pins `django~=5.2` to match apiver's own supported range — a
+mismatch here fails at `uv sync`, not at any apiver command.
+
+Add `"apiver"` to `config/settings.py`'s `INSTALLED_APPS` — it has no models, but its system
+checks (layout, manifest freshness, max-live-versions) only register via `AppConfig.ready()`:
 
 ```diff
  INSTALLED_APPS = [
@@ -57,34 +63,54 @@ Then add `"apiver"` to `config/settings.py`'s `INSTALLED_APPS`, right after `drf
  ]
 ```
 
-## 2. Add the four settings
+## 2. Add the four settings, and skip repeating `--settings`
 
 At the bottom of `config/settings.py`:
 
 ```python
-APIVER_ROOT_DIR = "api"
-APIVER_ROOT_PREFIX = "api/"
-APIVER_BASE_VERSION = "v1"
-APIVER_VERSIONS = ["v1"]
+APIVER_ROOT_DIR = "api"          # dotted path to the package holding every version
+APIVER_ROOT_PREFIX = "api/"      # absolute URL path every version mounts under
+APIVER_BASE_VERSION = "v1"       # the name init adopts the existing API as
+APIVER_VERSIONS = ["v1"]         # hand-maintained list of Live version names
 ```
 
-`reference/`'s whole pre-existing API already lives under `api/` (`config/urls.py` mounts every
-app at `path("api/", ...)`), which is exactly why no `--prefix` override is needed in the next
-step — `APIVER_ROOT_PREFIX` already names it.
+`reference/`'s whole pre-existing API already lives under `api/`, which is why no `--prefix`
+override is needed below — `APIVER_ROOT_PREFIX` already names it. (`APIVER_ROOT_PREFIX` is only
+about where the *new* versioned surface mounts, not where existing code lives today — if those
+differ, `apiver init --prefix <path>` says so explicitly. `--prefix` is a single path; a project
+with routes scattered across unrelated prefixes needs one `init` run against the largest tree plus
+hand-written `register()` calls for the rest — multi-prefix support is
+[#61](https://github.com/edraobdu/apiver/issues/61).)
+
+`apiver` is a standalone CLI, not a `manage.py` subcommand, so it needs Django settings resolved
+one way or another. Rather than passing `--settings` (or exporting `DJANGO_SETTINGS_MODULE`) on
+every single command below, set it once:
+
+```diff
+ [tool.uv.sources]
+ apiver = { path = "..", editable = true }
++
++[tool.apiver]
++django_settings_module = "config.settings"
+```
+
+Every `apiver` command checked `--settings`, then the env var, then this, in that order — so this
+is a project-local default, always overridable. (`manage.py` needs no equivalent: it already sets
+`DJANGO_SETTINGS_MODULE` itself via `os.environ.setdefault`.)
 
 ## 3. Run `apiver init`
 
 ```console
-$ uv run apiver --settings config.settings init
+$ uv run apiver init
 wrote .../reference/api/v1/registry.py
 wrote .../reference/api/urls.py
 wrote .../reference/apiver.toml
 ```
 
-`api/v1/registry.py` is generated in full — every one of `reference/`'s pre-existing resources
-(`addresses`, `legacy-invoices`, `notifications` plus its `mark-all-read` action, `orders` plus its
-CSV export, `payments` plus its summary view, `users`, `webhooks`) shows up as one `register()`
-call, importing the existing views exactly where they already lived:
+`api/v1/registry.py` is generated in full — every pre-existing resource (`addresses`,
+`legacy-invoices`, `notifications` plus its `mark-all-read` action, `orders` plus its CSV export,
+`payments` plus its summary view, `users`, `webhooks`) becomes one `register()` call, importing
+the existing views exactly where they already lived:
 
 ```python
 v1 = Version('v1')
@@ -113,41 +139,48 @@ urlpatterns = [
 ]
 ```
 
-Now point the project's real root `urls.py` at it, appended after everything already there:
+Point the project's real root `urls.py` at it — one appended `include()`, nothing else changes:
 
 ```diff
      path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
      path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
-+    # apiver's Aggregation Root (ADR 0007 item 2), appended, not substituted:
-+    # everything above stays exactly where it was before adopting apiver.
++    # apiver's Aggregation Root, appended, not substituted: everything above
++    # stays exactly where it was before adopting apiver.
 +    path("", include("api.urls")),
  ]
 ```
 
+The new surface lives at `/api/v1/...`, reaching the same handlers a second way. The old,
+unversioned paths keep serving exactly as before — retiring them is a separate decision, not a
+side effect of `init`.
+
+**Schema/docs get version-qualified names automatically.** A bare `schema`/`docs` name on the Base
+Version would collide with the pre-existing, identically-named routes kept mounted alongside it —
+Django's `reverse()` would silently pick whichever was registered last. So the discovered schema
+view is always named `f"{base_name}-schema"` and the docs view's `url_name` is repointed at it,
+regardless of what they were called before — shown above (`v1-schema`, `v1-docs`).
+
+### If init refuses
+
+`init` writes nothing and reports every offending route at once. Common causes: a ViewSet mounted
+without explicit `basename=`; a handler with no importable symbol (built in a closure/decorator
+without `functools.wraps`); `re_path()` instead of `path()`; a namespaced `include()` or
+`i18n_patterns()` at the root; more than one drf-spectacular schema view under the prefix. Register
+any of these by hand instead — `init` covers the common case, not every case. `reference/` never
+triggers any of them.
+
 ## 4. Verify the base version
 
 ```console
-$ DJANGO_SETTINGS_MODULE=config.settings uv run python manage.py check
+$ uv run python manage.py check
 System check identified no issues (0 silenced).
 
 $ uv run pytest -q
 25 passed, 3 warnings in 0.34s
 ```
 
-All 25 pre-existing tests pass **unmodified** — they hit the original, unversioned paths
-(`/api/users/`, `/api/legacy-invoices/`, ...), which `init` never touched. The new surface lives
-at `/api/v1/...`, reachable a second way:
-
-```console
-$ curl -s localhost:8000/api/v1/schema/ | head -c 40
-$ curl -s localhost:8000/api/v1/docs/ -o /dev/null -w '%{http_code}\n'
-200
-```
-
-Both resolve to their own, version-qualified route names (`v1-schema`, `v1-docs`) rather than
-colliding with the pre-existing `schema`/`docs` names still mounted alongside them — see
-`getting-started.md`'s "The base version's schema and docs routes are automatically renamed" for
-why that matters.
+All 25 pre-existing tests pass **unmodified** — they hit the original, unversioned paths, which
+`init` never touched.
 
 ## 5. Mount v2
 
@@ -157,14 +190,14 @@ why that matters.
 ```
 
 ```console
-$ uv run apiver --settings config.settings mount v2 --from v1
+$ uv run apiver mount v2 --from v1
 wrote .../reference/api/v2/registry.py
 wrote .../reference/api/urls.py
 apiver: add 'v2' to APIVER_VERSIONS to make it live.
 ```
 
-The generated `api/v2/registry.py` is deliberately minimal — `derive()` plus schema/docs, nothing
-resource-specific yet:
+`mount` never touches `settings.py` itself — that's the reminder above; skip it and the version
+silently fails to resolve. The generated `api/v2/registry.py` is deliberately minimal:
 
 ```python
 from api.v1.registry import v1
@@ -174,15 +207,23 @@ v2.override('schema/', v2.schema_view(prefix='api/v2/'), name='schema')
 v2.override('docs/', v2.docs_view(), name='docs')
 ```
 
-Note there's no hand-written Swagger/Redoc subclass needed here (an earlier draft of this project
-needed one) — `docs_view()` already resolves the right, namespaced schema route for whichever
-version calls it.
+Both use `override()` because `init` already wired `schema/`/`docs/` on v1 — `mount` uses
+`register()` only when deriving from a version that doesn't already have one. No hand-written
+Swagger/Redoc subclass is needed here either — `docs_view()` resolves the right, namespaced schema
+route for whichever version calls it.
 
 ## 6. Author the breaking changes
 
 This is the part `mount` never does for you — the six catalogue rows (issue #22's "awkward or
-schema-invisible" set) that a prospective adopter most needs to see, all landing on `reference/`'s
-existing `users`/`orders`/`payments`/`webhooks`/`legacy-invoices` resources.
+schema-invisible" set) landing on `reference/`'s existing `users`/`orders`/`payments`/`webhooks`/
+`legacy-invoices` resources.
+
+Class-based handlers registered or overridden on a non-base version must carry the version's name,
+uppercased, in their class name (`PaymentSerializerV2`, not `PaymentSerializer`) — enforced at
+`register()`/`override()` time, because drf-spectacular names schema components off
+`__class__.__name__` alone, and two same-named classes in different versions would collide. This
+applies even to a handler that's otherwise unchanged (only its URL moved, or it's a third-party
+class you don't own) — subclass it trivially just to carry the suffix.
 
 Create `api/v2/serializers.py`:
 
@@ -333,18 +374,22 @@ two lines already there:
 +v2.register("webhooks", WebhookEndpointViewSetV2, basename="webhooks")
 ```
 
+`override()` replaces the whole registration — no partial override, so a narrower one drops any
+parent routes it doesn't re-declare. `remove()` only stops this version (and its descendants) from
+serving a key; the parent is unaffected.
+
 ## 7. Verify again
 
 ```console
-$ DJANGO_SETTINGS_MODULE=config.settings uv run python manage.py check
+$ uv run python manage.py check
 System check identified some issues:
 WARNINGS:
 ?: (apiver.W001) .../apiver.toml is stale or missing — run `apiver manifest` to regenerate it.
 
-$ DJANGO_SETTINGS_MODULE=config.settings uv run apiver manifest
+$ uv run apiver manifest
 wrote .../reference/apiver.toml
 
-$ DJANGO_SETTINGS_MODULE=config.settings uv run python manage.py check
+$ uv run python manage.py check
 System check identified no issues (0 silenced).
 
 $ uv run pytest -q
@@ -355,7 +400,7 @@ The 25 pre-existing tests still pass unmodified — v1's surface is untouched by
 `apiver versions` confirms the composition without booting the project at all:
 
 ```console
-$ DJANGO_SETTINGS_MODULE=config.settings uv run apiver versions
+$ uv run apiver versions
 v1 (base version) — mutable, live
   routes: 22 defined, 0 inherited
     ...
@@ -377,11 +422,9 @@ v2 (derived from v1) — mutable, live
     ...
 ```
 
-v2 defines exactly the 3 overridden resources (with their inherited-from-parent routes gone —
-`payments` drops `refund`, `orders`/`users` still have both their routes but with the changed
-serializer) plus `webhooks` at its new prefix and its own `docs`/`schema`; `legacy-invoices` and
-`integrations/webhooks` don't appear under v2 at all. Everything else (`addresses`,
-`notifications`, `healthz`) is inherited from v1 unchanged.
+v2 defines exactly the 3 overridden resources plus `webhooks` at its new prefix and its own
+`docs`/`schema`; `legacy-invoices` and `integrations/webhooks` don't appear under v2 at all.
+Everything else (`addresses`, `notifications`, `healthz`) is inherited from v1 unchanged.
 
 ### Confirming each row actually works, not just composes
 
@@ -408,17 +451,30 @@ hand against a migrated dev database:
 {'id': 1, 'username': 'ada', 'email': 'ada@example.com', 'full_name': 'Ada Lovelace', 'is_active': True}
 ```
 
-## Where this diverges from `getting-started.md`
+## 8. Naming a stable pointer (optional)
 
-- `getting-started.md`'s step 6 shows a `PaymentSerializerV2`-style example with an illustrative
-  `override("payments", ...)` — this tutorial's version is the same idiom, landed for real on
-  `reference/`'s actual `payments`/`orders`/`users`/`webhooks` resources, plus the two
-  whole-resource changes (`remove("legacy-invoices")`, the `webhooks` prefix move) the generic
-  guide doesn't have a concrete resource to hang on.
-- `getting-started.md`'s "If init refuses" section lists failure modes in the abstract;
-  `reference/` never triggers any of them (every route classified cleanly on the first `init`
-  run), so this tutorial has nothing to add there.
-- Not attempted here: deprecating v1 once v2 ships (`Version.deprecate(sunset=...)`) or declaring
-  a `stable` alias pointing at v2 (`apiver alias`, `getting-started.md` step 8) — both are real
-  library capabilities, just outside issue #22's six-row catalogue scope. Either is a natural next
-  exercise against this same `reference/` state.
+A client-facing name (`stable`, `current`) that should move to a different version later, without
+callers changing their URL, is an `Alias`, not another mounted version:
+
+```console
+$ uv run apiver alias stable --from v2
+```
+
+Writes no `registry.py` of its own — `Alias.schema_view()`/`docs_view()` proxy straight through to
+the target's, so re-pointing it later is a one-line `target=` edit. Like `mount`, never touches
+`settings.py`:
+
+```python
+APIVER_ALIASES = ["stable"]
+```
+
+## Not covered here
+
+- **Deprecating a version** (`Version.deprecate(sunset=...)`) — outside issue #22's six-row
+  catalogue scope; a natural next exercise against this same `reference/` state.
+- **Hyperlinked serializers and version-aware `reverse()`.** `HyperlinkedModelSerializer`/
+  `HyperlinkedRelatedField` aren't demonstrated because they aren't supported yet: the design is
+  accepted (`docs/adr/0005-intra-version-hyperlinking.md`) but unimplemented — no `apiver.reverse`,
+  no request-stamping, no `get_url` patch exist in the library today. Using either in an inherited
+  serializer currently produces silently wrong-version links. Tracked as
+  [#62](https://github.com/edraobdu/apiver/issues/62).
