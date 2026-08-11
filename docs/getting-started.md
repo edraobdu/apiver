@@ -193,7 +193,10 @@ version gets both wired unconditionally, even one derived from a chain that neve
 own — an API without a reachable schema and docs page isn't shippable, so `mount` never leaves either
 unwired for "no source to copy from."
 
-`mount` never touches `settings.py` — add the new name to `APIVER_VERSIONS` by hand:
+`mount` never touches `settings.py` — add the new name to `APIVER_VERSIONS` by hand. `mount` prints a
+reminder to do this as its last line of output, precisely because it's the one step left for a
+developer to forget: skipping it isn't caught here, it fails silently at request time instead, since
+the new version simply won't resolve.
 
 ```python
 APIVER_VERSIONS = ["v1", "v2"]
@@ -208,8 +211,8 @@ wrote:
 api/v2/
     __init__.py       # already created by mount
     registry.py        # already created by mount — derive() plus schema/docs, add your Delta below
-    serializers.py     # subclasses of v1's serializers that need to change, named ...V2
-    views.py            # subclasses of v1's views/viewsets that need to change, named ...V2
+    serializers.py     # this version's changed serializers, named ...V2
+    views.py            # this version's changed views/viewsets, named ...V2
 ```
 
 Class-based handlers registered or overridden on a non-base version must carry the version's name,

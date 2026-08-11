@@ -50,6 +50,11 @@ def _cmd_mount(*, version_name: str, from_version: str) -> int:
 
     print(f"wrote {registry_path}")
     print(f"wrote {aggregation_path}")
+    # Unlike migrate (folded into APIVER_VERSIONS ahead of the base
+    # version's registry.py existing), mount has nothing to check this
+    # against — the new version isn't live yet, so a forgotten settings
+    # edit fails silently at request time rather than here.
+    print(f"apiver: add {version_name!r} to APIVER_VERSIONS to make it live.")
     return 0
 
 
