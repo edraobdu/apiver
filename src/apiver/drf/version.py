@@ -415,3 +415,41 @@ class Version:
             custom_settings["DESCRIPTION"] = description
         custom_settings["VERSION"] = version if version is not None else self.name
         return SpectacularAPIView.as_view(patterns=mount, custom_settings=custom_settings)
+
+
+class Alias:
+    """A movable name that resolves through a target Version's exact mounts.
+
+    Declared independently of `Version` (ADR 0002 item 8) — an alias points
+    *at* a Version without being owned by one, and is re-pointed by editing
+    `target=`. Mounting it reuses the target's exact callback objects at a
+    second prefix rather than a fresh registration, so an alias can never
+    drift from the version it names.
+
+    A broken target (an undefined name, an import that failed) fails at
+    Python import time before `Alias` ever runs — there is no request-time
+    "alias points nowhere" case to gate here.
+
+    The alias's schema route is not built by this class: reusing the
+    target's already-built `SpectacularAPIView` instance — not calling
+    `target.schema_view()` a second time — is what keeps it from becoming a
+    second generated document. The caller mounts the same view object
+    returned by the target's own `schema_view()` call at the alias's prefix
+    too (see the `schema_view()` docstring, and `tests/testapp/urls.py`).
+    """
+
+    def __init__(self, name: str, *, target: Version):
+        self.name = name
+        self.target = target
+
+    @property
+    def urls(self):
+        # The target's own patterns are reused unchanged; only the
+        # *instance* namespace differs (ADR 0002 item 8) — `namespace=`
+        # here, distinct from the `target.name` app_name, is what makes
+        # `reverse("stable:...")` and `reverse("v2:...")` resolve
+        # independently for the identical view. Without it, `include()`
+        # would default the instance namespace to the app_name and
+        # "stable:..." would never resolve.
+        patterns, _ = self.target.urls
+        return include((patterns, self.target.name), namespace=self.name)

@@ -1,3 +1,3 @@
-from .version import CompositionError, Registration, Route, RouteIdentity, Version
+from .version import Alias, CompositionError, Registration, Route, RouteIdentity, Version
 
-__all__ = ["CompositionError", "Registration", "Route", "RouteIdentity", "Version"]
+__all__ = ["Alias", "CompositionError", "Registration", "Route", "RouteIdentity", "Version"]
