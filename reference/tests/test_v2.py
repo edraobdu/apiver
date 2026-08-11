@@ -8,6 +8,8 @@ output change), 12 (whole-resource removal), 13 (URL prefix change), 14b (@actio
 removal). See api/v2/serializers.py and api/v2/views.py for the idiom each uses.
 """
 
+import re
+
 import pytest
 from rest_framework.test import APIClient
 
@@ -310,3 +312,30 @@ def test_v1_and_v2_schema_documents_do_not_leak_each_others_routes(client):
     assert "/api/v2/webhooks/" not in v1_paths
     assert all(path.startswith("/api/v1/") for path in v1_paths)
     assert all(path.startswith("/api/v2/") for path in v2_paths)
+
+
+@pytest.mark.parametrize(
+    ("docs_path", "expected_schema_path"),
+    [
+        ("/api/docs/", "/api/schema/"),
+        ("/api/v1/docs/", "/api/v1/schema/"),
+        ("/api/v2/docs/", "/api/v2/schema/"),
+    ],
+)
+def test_each_docs_page_points_at_its_own_schema_not_a_sibling_versions(client, docs_path, expected_schema_path):
+    """Regression: the pre-existing project's own api/docs/ and api/schema/ stay
+    mounted unchanged alongside the versioned surface (adoption is additive, not
+    a replacement — see config/urls.py), and the Base Version deliberately keeps
+    bare, unnamespaced route names (ADR 0001 item 4) to match what the
+    pre-existing project already used. Left alone, that means the pre-existing
+    "schema"/"docs" names and v1's own collide, and Django's reverse() silently
+    resolves the bare name to whichever pattern was registered last — the old
+    docs page ends up pointing at v1's schema, not its own. api/v1/registry.py
+    renames v1's routes to "v1-schema"/"v1-docs" to keep all three unambiguous.
+    """
+    response = client.get(docs_path)
+
+    assert response.status_code == 200
+    match = re.search(r'url:\s*[\'"]([^\'"]+)[\'"]', response.content.decode())
+    assert match is not None
+    assert match.group(1) == expected_schema_path
