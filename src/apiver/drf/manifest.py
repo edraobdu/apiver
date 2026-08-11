@@ -2,7 +2,7 @@
 resolution tables (ticket 16, ADR 0003 items 5-9).
 
 Two settings tell apiver which live objects to serialize — there is no
-registry to walk yet (that lands with `apiver migrate`/`apiver versions`,
+registry to walk yet (that lands with `apiver init`/`apiver versions`,
 tickets 17-18), so a project points at its own objects explicitly:
 
 - `APIVER_VERSIONS`: a plain list of Live version names, e.g. `["v1",

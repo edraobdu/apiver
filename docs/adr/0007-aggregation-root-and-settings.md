@@ -77,9 +77,11 @@ Decided in #39.
 - **Keeping `APIVER_VERSION_ROOTS` explicit alongside the new settings**, for projects where a version's
   package might live somewhere irregular. Rejected — nothing in the codebase has ever needed that
   flexibility, and it's exactly the kind of scattered-by-default shape this ADR exists to close off.
-- **An `apiver init` command to scaffold the initial settings block.** Flagged as worth having, but
-  deferred — whether it writes `settings.py` directly or only prints a recommended block for the developer
-  to paste in is its own decision, not one to make as a side effect of this ADR.
+- **A separate `apiver init` command to scaffold the initial settings block.** Flagged as worth having,
+  but deferred — whether it writes `settings.py` directly or only prints a recommended block for the
+  developer to paste in is its own decision, not one to make as a side effect of this ADR. (This is a
+  distinct, still-unbuilt idea from ticket #51's amendment below, which reuses the `init` name for
+  `migrate` itself rather than for a settings-scaffolding tool.)
 
 ## Consequences
 
@@ -135,3 +137,18 @@ under the Aggregation Root.
 that every `APIVER_ALIASES` entry resolves at its derived path and is an `Alias` instance — the same
 proactive `manage.py check` guarantee item 5's amendment above already gives a misconfigured
 `APIVER_VERSIONS` entry, extended to the one setting that still named a path by hand.
+
+**Amendment (ticket #51): `migrate` is renamed `init` — the first command every project runs,
+adopted or greenfield — not the separate settings-scaffolding tool this ADR's Considered Options
+flagged and deferred under the same name.** Review on #50 (#47) observed that `migrate` had stopped
+being adoption-only in practice: every project, including one with no pre-existing API at all, needs
+its Base Version's `registry.py` and Aggregation Root generated before anything else can happen, and
+"migrate" reads as though it only applies to the adoption case. `apiver init` (`write_init`,
+`InitError` — renamed from `write_registry`/`MigrateError` in `apiver.drf.init`, formerly
+`apiver.drf.migrate`) keeps `migrate`'s exact adoption behavior unchanged; only the name moves. A
+project with genuinely nothing under `APIVER_ROOT_PREFIX`/`--prefix` no longer refuses with "nothing
+to migrate" — `discover()` always emits a schema and a docs plan even when nothing else was found
+under `--prefix`, registering both unconditionally at `schema/`/`docs/` exactly as `mount` already
+does for every later version (item 7's amendment above), so a route-less Base Version is a valid
+outcome, not a failure. A pre-existing schema/docs route, once discovered, keeps its own
+version-qualified name as before — the default only fills the gap when nothing was there to rename.

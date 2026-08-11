@@ -1,21 +1,30 @@
-"""`apiver migrate`: walk the live URLconf and generate the base version's
+"""`apiver init`: walk the live URLconf and generate the base version's
 `registry.py`, mounting it into the Aggregation Root (ticket 17, ADR 0003
-items 3-4, 7; ticket 43, ADR 0007). `apiver mount` (`write_mount`) shares
-this module: it generates every later version's `registry.py` from
-scratch — `<version> = <from_version>.derive(<version>)`, with its own
-schema and docs routes always wired — then appends its `include()` to
-that same Aggregation Root (ticket #47). A developer never hand-writes a
-version into existence; `mount` is what creates it, and everything past
-that (its actual changed endpoints) is a hand-edit to the file `mount`
-just created. `apiver alias` (`write_alias`) also shares this module: it
-declares a new `Alias` pointing at an already-mounted Version straight in
-the Aggregation Root — its conventional home — with no separate
-`registry.py` of its own (ticket #53, ADR 0007's second amendment).
+items 3-4, 7; ticket 43, ADR 0007; ticket #51 — renamed from `migrate`,
+since it's the first command every project runs, adopted or greenfield).
+`apiver mount` (`write_mount`) shares this module: it generates every later
+version's `registry.py` from scratch — `<version> =
+<from_version>.derive(<version>)`, with its own schema and docs routes
+always wired — then appends its `include()` to that same Aggregation Root
+(ticket #47). A developer never hand-writes a version into existence;
+`mount` is what creates it, and everything past that (its actual changed
+endpoints) is a hand-edit to the file `mount` just created. `apiver alias`
+(`write_alias`) also shares this module: it declares a new `Alias` pointing
+at an already-mounted Version straight in the Aggregation Root — its
+conventional home — with no separate `registry.py` of its own (ticket #53,
+ADR 0007's second amendment).
 
 Generates wiring only — it never moves a file. The existing
 `serializers.py`/`views.py` stay wherever the pre-existing project already
 put them; `registry.py` just imports from there and calls `register()`
 (ADR 0003 item 3).
+
+A project with no pre-existing routes under `--prefix` at all — a
+greenfield project running `init` for the first time, never having adopted
+anything — still gets a valid Base Version out of `init`: no routes is not
+a failure, it just means `discover()` classifies nothing beyond the schema
+and docs routes `init` always wires unconditionally, the same way `mount`
+already wires them for every later version (ticket #51).
 
 This module writes its own URLconf enumerator rather than reusing
 drf-spectacular's or DRF's own schema `EndpointEnumerator`. Both are lossy
@@ -23,7 +32,7 @@ drf-spectacular's or DRF's own schema `EndpointEnumerator`. Both are lossy
 `.cls` subclassing `APIView` — every plain Django view, every
 `django.views.generic` view, every undecorated function view
 (`rest_framework/schemas/generators.py:26-33, 117-118`, ticket 02's
-research) — which is exactly the population migrate must not lose. Ground
+research) — which is exactly the population init must not lose. Ground
 truth for a router-registered viewset's `basename`/`detail`/`actions` is
 read from `callback.initkwargs`/`callback.actions`, never from the handler
 class: `ViewSetMixin.as_view()` resets `cls.basename`/`cls.detail`/
@@ -35,7 +44,7 @@ The 16 failure modes catalogued in ticket 02's research
 for what this module must refuse rather than silently mis-emit. Discovery
 is followed by verification: every generated registration is rebuilt as a
 real in-memory `Version` and diffed against what was actually discovered,
-so a bug in prefix derivation fails the `migrate` run instead of shipping a
+so a bug in prefix derivation fails the `init` run instead of shipping a
 registry that silently serves the wrong routes (recommendation #5).
 """
 
@@ -59,10 +68,10 @@ _FORMAT_SUFFIX_RE = re.compile(r"\(\?P<format>|drf_format_suffix")
 _MAX_DEPTH = 64
 
 
-class MigrateError(RuntimeError):
+class InitError(RuntimeError):
     """One or more routes under `--prefix` could not be classified or
     regenerated. Raised with every offending route listed at once —
-    migrate fails closed and writes nothing rather than emit a registry
+    init fails closed and writes nothing rather than emit a registry
     that silently drops routes (ticket 02 recommendation #5)."""
 
 
@@ -82,7 +91,7 @@ class _Endpoint:
 
 @dataclass(frozen=True)
 class RegistrationPlan:
-    """One `register()` call migrate will emit."""
+    """One `register()` call init will emit."""
 
     key: str
     kind: str  # "viewset" | "view" | "schema" | "docs"
@@ -143,13 +152,13 @@ def _walk(
                 diagnostics.append(
                     "i18n_patterns() found at the URLconf root — its prefix depends on the active "
                     "language at walk time, so the discovered paths would be non-deterministic "
-                    "(ticket 02 F14). Not supported by migrate; adopt without i18n_patterns() first, "
+                    "(ticket 02 F14). Not supported by init; adopt without i18n_patterns() first, "
                     "or write registry.py by hand."
                 )
                 continue
             if pattern.namespace is not None:
                 diagnostics.append(
-                    f"{child_prefix!r} is included under namespace {pattern.namespace!r} — migrate "
+                    f"{child_prefix!r} is included under namespace {pattern.namespace!r} — init "
                     "only supports the base version's bare, unnamespaced URL names (ADR 0001 item 4, "
                     "ticket 02 F15). Remove the namespace before adopting, or write registry.py by "
                     "hand."
@@ -308,7 +317,7 @@ def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str, base_
     every in-scope route, and turn it into a plan for `Version.register()`.
 
     `schema_mount_prefix` is the base version's full absolute mount path
-    (`APIVER_ROOT_PREFIX + f"{base_name}/"`) — known at migrate time since
+    (`APIVER_ROOT_PREFIX + f"{base_name}/"`) — known at init time since
     ADR 0007 makes it a settings-time fact. It is only ever used to build a
     `schema_view(prefix=...)` plan for a discovered `SpectacularAPIView`
     (ticket #40): the naive `register('schema/', SpectacularAPIView, ...)`
@@ -334,6 +343,15 @@ def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str, base_
     Returns diagnostics for anything that could not be classified or
     regenerated rather than raising immediately — every offending route is
     collected and reported together (ticket 02 recommendation #5).
+
+    Always returns at least a schema and a docs plan (ticket #51): if
+    nothing under `prefix` classified as either, a default is appended —
+    `register('schema/', ...)`/`register('docs/', ...)`, the same keys
+    `mount` always uses for a freshly-authored version — rather than leaving
+    the Base Version to ship without one just because nothing pre-existing
+    was there to discover and rename. This is also what makes a genuinely
+    route-less project (nothing at all under `prefix`) still produce a
+    valid registry instead of a "nothing discovered" refusal.
     """
     endpoints: list[_Endpoint] = []
     diagnostics: list[str] = []
@@ -421,7 +439,7 @@ def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str, base_
     if len(schema_endpoints) > 1:
         diagnostics.append(
             f"{len(schema_endpoints)} drf-spectacular schema views found under prefix {prefix!r} "
-            f"({', '.join(sorted(e.path for e in schema_endpoints))}) — migrate can only auto-wire a "
+            f"({', '.join(sorted(e.path for e in schema_endpoints))}) — init can only auto-wire a "
             "single schema endpoint per version (ticket #40). Remove the extras, or register them by "
             "hand with Version.schema_view(prefix=...)."
         )
@@ -431,7 +449,7 @@ def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str, base_
             diagnostics.append(
                 f"{endpoint.path!r} is served by {endpoint.cls.__module__}.{endpoint.cls.__qualname__}, "
                 "a drf-spectacular schema view subclass (e.g. SpectacularYAMLAPIView/"
-                "SpectacularJSONAPIView) — migrate only auto-wires the exact, content-negotiated "
+                "SpectacularJSONAPIView) — init only auto-wires the exact, content-negotiated "
                 "SpectacularAPIView (ticket #40). Register it by hand with "
                 "Version.schema_view(prefix=...)."
             )
@@ -514,6 +532,37 @@ def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str, base_
             RegistrationPlan(key=key, kind="view", module=module, symbol=symbol, name=endpoint.url_name)
         )
 
+    # init wires schema/docs unconditionally — the same guarantee `mount`
+    # already gives every later version (ticket #47) — rather than leaving
+    # the Base Version to silently ship without either just because nothing
+    # pre-existing was discovered to rename (ticket #51). Only added when
+    # discovery above didn't already classify one: a pre-existing schema/
+    # docs route, once found, keeps its discovered name and prefix exactly
+    # as before. Neither default has a discovered `_Endpoint` behind it, so
+    # `groups` gets no entry for either key — `verify()` skips the produced-
+    # route-count diff for a key it never discovered anything under.
+    if not any(plan.kind == "schema" for plan in plans):
+        plans.append(
+            RegistrationPlan(
+                key="schema/",
+                kind="schema",
+                module="",
+                symbol="",
+                name=schema_name,
+                schema_prefix=schema_mount_prefix,
+            )
+        )
+    if not any(plan.kind == "docs" for plan in plans):
+        plans.append(
+            RegistrationPlan(
+                key="docs/",
+                kind="docs",
+                module="drf_spectacular.views",
+                symbol="SpectacularSwaggerView",
+                name=f"{base_name}-docs",
+            )
+        )
+
     # A "schema" plan must be emitted last: `schema_view()` snapshots
     # `self.urls` the moment it's called, so it only sees whatever was
     # registered before it — every other registration has to land first for
@@ -532,7 +581,7 @@ def verify(result: DiscoveryResult, *, base_name: str) -> list[str]:
     self-verifies that every registration produces at least one route and
     every produced route traces back to a registration
     (`apiver.drf.version.CompositionError`); this adds the check that
-    matters specifically for migrate — that the *count* of routes produced
+    matters specifically for init — that the *count* of routes produced
     under a derived key matches what was discovered there, catching a
     wrong router-prefix derivation that would otherwise silently register
     the right class under the wrong path.
@@ -558,6 +607,12 @@ def verify(result: DiscoveryResult, *, base_name: str) -> list[str]:
 
     diagnostics: list[str] = []
     for plan in result.plans:
+        if plan.key not in result._groups:
+            # init's unconditional default schema/docs plan (no pre-existing
+            # route was discovered to diff against) — nothing to verify here
+            # beyond what the `try` above already proved: that registering
+            # it composes at all.
+            continue
         produced = [
             route
             for route in table.values()
@@ -567,7 +622,7 @@ def verify(result: DiscoveryResult, *, base_name: str) -> list[str]:
         if len(produced) != expected:
             diagnostics.append(
                 f"verification failed for key {plan.key!r}: discovered {expected} route(s) but "
-                f"registering it produced {len(produced)} — migrate's prefix derivation likely made "
+                f"registering it produced {len(produced)} — init's prefix derivation likely made "
                 "a mistake; refusing to write a broken registry.py."
             )
     return diagnostics
@@ -625,7 +680,7 @@ def render_registry(plans: list[RegistrationPlan], *, base_name: str, var_name: 
             register_lines.append(f"{var_name}.register({plan.key!r}, {plan.symbol}, name={plan.name!r})")
 
     lines = [
-        '"""Generated once by `apiver migrate`; hand-editable afterwards, like',
+        '"""Generated once by `apiver init`; hand-editable afterwards, like',
         "Django's own `startapp` boilerplate — it is not regenerated on later",
         "runs (ADR 0003 item 4).",
         '"""',
@@ -646,7 +701,7 @@ def _ensure_root_dir_exists(root_dir: str) -> None:
     Unlike a version's own subpackage — which a developer authors by hand for
     anything past the Base Version (ADR 0003 item 3) — the root package is
     entirely apiver's own generated territory: nothing else ever has a reason to
-    create it first. Without this, the very first `migrate` or `mount` run in a
+    create it first. Without this, the very first `init` or `mount` run in a
     project that has never used apiver before fails on an unhelpful
     `ModuleNotFoundError` for a package the developer was never told to create.
     """
@@ -676,7 +731,7 @@ def _resolve_target_dir(module_path: str) -> Path:
     parent = import_module(parent_path)
     parent_dir = getattr(parent, "__path__", None)
     if parent_dir is None:
-        raise MigrateError(f"{parent_path!r} is a module, not a package — it cannot contain {leaf!r}.")
+        raise InitError(f"{parent_path!r} is a module, not a package — it cannot contain {leaf!r}.")
     return Path(next(iter(parent_dir))) / leaf
 
 
@@ -686,7 +741,7 @@ def render_aggregation_root(mounts: list[tuple[str, str]], *, root_dir: str) -> 
     absolute mount path. `mounts` is `[(version_name, absolute_prefix),
     ...]`, in the order they should appear.
 
-    Used to render the *initial* file only — by `migrate` for the base
+    Used to render the *initial* file only — by `init` for the base
     version, or by `apiver mount` seeding the very first mount in a
     greenfield project. Every mount after that is appended in place by
     `_write_or_extend_aggregation_root`, never re-rendered from scratch, so
@@ -695,7 +750,7 @@ def render_aggregation_root(mounts: list[tuple[str, str]], *, root_dir: str) -> 
     import_lines = [f"from {root_dir}.{name}.registry import {name}" for name, _ in mounts]
     mount_lines = [f"    path({prefix!r}, include({name}.urls))," for name, prefix in mounts]
     lines = [
-        '"""Generated by `apiver migrate`; extended in place by `apiver mount`',
+        '"""Generated by `apiver init`; extended in place by `apiver mount`',
         "as later versions are authored (ADR 0007 item 2). Hand-editable in",
         "between — apiver only ever appends a new version's mount here, never",
         'rewrites an existing line."""',
@@ -727,9 +782,9 @@ def _already_mounted(name: str, *, root_dir: str) -> bool:
 def _write_or_extend_aggregation_root(version_name: str, *, root_dir: str, mount_prefix: str) -> Path:
     """Mount `version_name` into `<root_dir>/urls.py`, creating the
     Aggregation Root (and its package, if needed) on the very first call —
-    shared by `migrate` (the base version's initial mount, ADR 0007 item 7)
+    shared by `init` (the base version's initial mount, ADR 0007 item 7)
     and `apiver mount` (every authored version after, including as the
-    first-ever mount in a greenfield project that never ran migrate).
+    first-ever mount in a greenfield project that never ran init).
 
     An existing file is extended by text insertion, not regenerated from
     `render_aggregation_root` — the file is meant to be hand-editable
@@ -754,12 +809,12 @@ def _write_or_extend_aggregation_root(version_name: str, *, root_dir: str, mount
 
     source = aggregation_path.read_text()
     if re.search(rf"include\({re.escape(version_name)}\.urls\)", source):
-        raise MigrateError(f"{version_name!r} is already mounted in {aggregation_path}.")
+        raise InitError(f"{version_name!r} is already mounted in {aggregation_path}.")
 
     lines = source.splitlines()
     import_indices = [i for i, line in enumerate(lines) if line.startswith(("from ", "import "))]
     if not import_indices:
-        raise MigrateError(
+        raise InitError(
             f"{aggregation_path} has no import statements to extend — has it been hand-edited into "
             "an unrecognized shape?"
         )
@@ -768,14 +823,14 @@ def _write_or_extend_aggregation_root(version_name: str, *, root_dir: str, mount
     try:
         open_idx = next(i for i, line in enumerate(lines) if line.strip() == "urlpatterns = [")
     except StopIteration:
-        raise MigrateError(
+        raise InitError(
             f"{aggregation_path} has no `urlpatterns = [` list — has it been hand-edited into an "
             "unrecognized shape?"
         ) from None
     try:
         close_idx = next(i for i in range(open_idx + 1, len(lines)) if lines[i].strip() == "]")
     except StopIteration:
-        raise MigrateError(
+        raise InitError(
             f"{aggregation_path}'s urlpatterns list has no closing `]` — has it been hand-edited into "
             "an unrecognized shape?"
         ) from None
@@ -788,7 +843,7 @@ def _write_or_extend_aggregation_root(version_name: str, *, root_dir: str, mount
 def _ensure_package(target_dir: Path) -> None:
     """Create `target_dir` and its `__init__.py` if either is missing —
     the same "make the directory this file is about to land in" step
-    `write_registry` already does for the base version, shared here so
+    `write_init` already does for the base version, shared here so
     `write_mount` doesn't duplicate it for an authored version's package.
     """
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -845,32 +900,32 @@ def write_mount(version_name: str, *, from_version: str) -> tuple[Path, Path]:
     and wiring its own schema/docs routes — then append its `include()` to
     the Aggregation Root (ADR 0007 item 7). `mount` is the only tool that
     creates a version's `registry.py`, and it does so exactly once:
-    refuses if the file already exists, the same posture `migrate` already
+    refuses if the file already exists, the same posture `init` already
     has for the base version (ADR 0003 item 4) — nothing to regenerate
     from once a developer has started adding their own endpoints to it.
 
     Never touches `settings.py` — adding `version_name` to `APIVER_VERSIONS`
-    stays a hand-edit, consistent with `migrate` only ever reading settings.
+    stays a hand-edit, consistent with `init` only ever reading settings.
 
     Returns `(registry_path, aggregation_path)`.
     """
     if not version_name.isidentifier():
-        raise MigrateError(
+        raise InitError(
             f"{version_name!r} is not a valid Python identifier — it becomes the module-level "
             "variable name in the generated registry.py."
         )
     if not from_version.isidentifier():
-        raise MigrateError(f"--from {from_version!r} is not a valid Python identifier.")
+        raise InitError(f"--from {from_version!r} is not a valid Python identifier.")
 
     root_dir = getattr(settings, "APIVER_ROOT_DIR", None)
     if not root_dir:
-        raise MigrateError(
+        raise InitError(
             "APIVER_ROOT_DIR is not set — apiver doesn't know where the aggregation root lives "
             "(ADR 0007 item 3)."
         )
     root_prefix = getattr(settings, "APIVER_ROOT_PREFIX", None)
     if root_prefix is None:
-        raise MigrateError(
+        raise InitError(
             "APIVER_ROOT_PREFIX is not set — apiver doesn't know the absolute URL path every "
             "version mounts under (ADR 0007 item 3)."
         )
@@ -881,29 +936,29 @@ def write_mount(version_name: str, *, from_version: str) -> tuple[Path, Path]:
     try:
         from_registry_module = import_module(from_registry_dotted)
     except ImportError as exc:
-        raise MigrateError(
+        raise InitError(
             f"{from_registry_dotted!r} could not be imported: {exc}. `--from` must name a version "
             "that has already been mounted, so its registry.py already exists."
         ) from exc
     from_version_obj = getattr(from_registry_module, from_version, None)
     if not isinstance(from_version_obj, Version):
-        raise MigrateError(f"{from_registry_dotted}.{from_version} is not a Version instance.")
+        raise InitError(f"{from_registry_dotted}.{from_version} is not a Version instance.")
 
     target_dir = _resolve_target_dir(f"{root_dir}.{version_name}")
     registry_path = target_dir / "registry.py"
     if registry_path.is_file():
-        raise MigrateError(
+        raise InitError(
             f"{registry_path} already exists — mount writes registry.py once and never regenerates "
             "it (ADR 0003 item 4). Hand-edit it directly, or remove it first to regenerate from "
             "scratch."
         )
     # Checked before anything is written, not just inside
     # `_write_or_extend_aggregation_root` at the end — mount must write
-    # nothing at all when it can't finish, the same posture `write_registry`
+    # nothing at all when it can't finish, the same posture `write_init`
     # already takes (ticket 02 recommendation #5).
     if _already_mounted(version_name, root_dir=root_dir):
         aggregation_path = _resolve_target_dir(root_dir) / "urls.py"
-        raise MigrateError(f"{version_name!r} is already mounted in {aggregation_path}.")
+        raise InitError(f"{version_name!r} is already mounted in {aggregation_path}.")
 
     mount_prefix = root_prefix + f"{version_name}/"
     source = render_mount_registry(
@@ -923,11 +978,11 @@ def write_mount(version_name: str, *, from_version: str) -> tuple[Path, Path]:
     return registry_path, aggregation_path
 
 
-def write_registry(*, prefix: str | None) -> tuple[Path, Path]:
-    """The full `apiver migrate` flow: resolve where to write, walk the
+def write_init(*, prefix: str | None) -> tuple[Path, Path]:
+    """The full `apiver init` flow: resolve where to write, walk the
     live URLconf, classify and verify every in-scope route, then write
     `registry.py` and mount it into the Aggregation Root (ADR 0003 items
-    3-4, 7; ADR 0007 items 2, 7). Raises `MigrateError` — with every
+    3-4, 7; ADR 0007 items 2, 7). Raises `InitError` — with every
     offending route listed, not just the first — and writes nothing at all
     if any route under `prefix` could not be classified, regenerated, or
     verified.
@@ -936,25 +991,25 @@ def write_registry(*, prefix: str | None) -> tuple[Path, Path]:
     """
     base_name = getattr(settings, "APIVER_BASE_VERSION", None)
     if not base_name:
-        raise MigrateError(
-            "APIVER_BASE_VERSION is not set — apiver doesn't know which version `migrate` is adopting "
+        raise InitError(
+            "APIVER_BASE_VERSION is not set — apiver doesn't know which version `init` is adopting "
             "the project as. Set it in settings, alongside APIVER_ROOT_DIR (ADR 0007 item 3)."
         )
     if not base_name.isidentifier():
-        raise MigrateError(
+        raise InitError(
             f"APIVER_BASE_VERSION={base_name!r} is not a valid Python identifier — it becomes the "
             "module-level variable name in the generated registry.py."
         )
 
     root_dir = getattr(settings, "APIVER_ROOT_DIR", None)
     if not root_dir:
-        raise MigrateError(
+        raise InitError(
             "APIVER_ROOT_DIR is not set — apiver doesn't know where to write registry.py. Set it to "
             "the dotted path of the aggregation root package (ADR 0007 item 3)."
         )
     root_prefix = getattr(settings, "APIVER_ROOT_PREFIX", None)
     if root_prefix is None:
-        raise MigrateError(
+        raise InitError(
             "APIVER_ROOT_PREFIX is not set — apiver doesn't know the absolute URL path every version "
             "mounts under (ADR 0007 item 3)."
         )
@@ -976,19 +1031,19 @@ def write_registry(*, prefix: str | None) -> tuple[Path, Path]:
     target_dir = _resolve_target_dir(module_path)
     registry_path = target_dir / "registry.py"
     if registry_path.is_file():
-        raise MigrateError(
-            f"{registry_path} already exists — migrate writes registry.py once and never regenerates "
+        raise InitError(
+            f"{registry_path} already exists — init writes registry.py once and never regenerates "
             "it (ADR 0003 item 4). Hand-edit it directly, or remove it first to regenerate from "
             "scratch."
         )
     # Checked before anything is written, not just inside
-    # `_write_or_extend_aggregation_root` at the end — migrate must write
+    # `_write_or_extend_aggregation_root` at the end — init must write
     # nothing at all when it can't finish (ticket 02 recommendation #5),
     # and a re-run after only registry.py was removed by hand is exactly
     # the case where the aggregation root already has this mount.
     if _already_mounted(base_name, root_dir=root_dir):
         aggregation_path = _resolve_target_dir(root_dir) / "urls.py"
-        raise MigrateError(f"{base_name!r} is already mounted in {aggregation_path}.")
+        raise InitError(f"{base_name!r} is already mounted in {aggregation_path}.")
 
     mount_prefix = root_prefix + f"{base_name}/"
     root_urlconf = import_module(settings.ROOT_URLCONF)
@@ -996,13 +1051,15 @@ def write_registry(*, prefix: str | None) -> tuple[Path, Path]:
         root_urlconf.urlpatterns, prefix=prefix, schema_mount_prefix=mount_prefix, base_name=base_name
     )
     if result.diagnostics:
-        raise MigrateError("\n".join(f"- {message}" for message in result.diagnostics))
-    if not result.plans:
-        raise MigrateError(f"no routes discovered under prefix {prefix!r} — nothing to migrate.")
+        raise InitError("\n".join(f"- {message}" for message in result.diagnostics))
+    # No "nothing discovered" refusal: `discover()` always emits at least
+    # the unconditional schema/docs plans, so a genuinely empty greenfield
+    # project — no pre-existing routes under `prefix` at all — still gets a
+    # valid, if route-less, Base Version out of `init` (ticket #51).
 
     verify_diagnostics = verify(result, base_name=base_name)
     if verify_diagnostics:
-        raise MigrateError("\n".join(f"- {message}" for message in verify_diagnostics))
+        raise InitError("\n".join(f"- {message}" for message in verify_diagnostics))
 
     source = render_registry(result.plans, base_name=base_name, var_name=base_name)
 
@@ -1038,7 +1095,7 @@ def _extend_aggregation_root_with_alias(
 
     import_indices = [i for i, line in enumerate(lines) if line.startswith(("from ", "import "))]
     if not import_indices:
-        raise MigrateError(
+        raise InitError(
             f"{aggregation_path} has no import statements to extend — has it been hand-edited into "
             "an unrecognized shape?"
         )
@@ -1048,7 +1105,7 @@ def _extend_aggregation_root_with_alias(
     try:
         open_idx = next(i for i, line in enumerate(lines) if line.strip() == "urlpatterns = [")
     except StopIteration:
-        raise MigrateError(
+        raise InitError(
             f"{aggregation_path} has no `urlpatterns = [` list — has it been hand-edited into an "
             "unrecognized shape?"
         ) from None
@@ -1058,7 +1115,7 @@ def _extend_aggregation_root_with_alias(
     try:
         close_idx = next(i for i in range(open_idx + 1, len(lines)) if lines[i].strip() == "]")
     except StopIteration:
-        raise MigrateError(
+        raise InitError(
             f"{aggregation_path}'s urlpatterns list has no closing `]` — has it been hand-edited "
             "into an unrecognized shape?"
         ) from None
@@ -1090,22 +1147,22 @@ def write_alias(name: str, *, from_version: str) -> Path:
     Returns the Aggregation Root's path.
     """
     if not name.isidentifier():
-        raise MigrateError(
+        raise InitError(
             f"{name!r} is not a valid Python identifier — it becomes the module-level variable name "
             "appended to the Aggregation Root."
         )
     if not from_version.isidentifier():
-        raise MigrateError(f"--from {from_version!r} is not a valid Python identifier.")
+        raise InitError(f"--from {from_version!r} is not a valid Python identifier.")
 
     root_dir = getattr(settings, "APIVER_ROOT_DIR", None)
     if not root_dir:
-        raise MigrateError(
+        raise InitError(
             "APIVER_ROOT_DIR is not set — apiver doesn't know where the aggregation root lives "
             "(ADR 0007 item 3)."
         )
     root_prefix = getattr(settings, "APIVER_ROOT_PREFIX", None)
     if root_prefix is None:
-        raise MigrateError(
+        raise InitError(
             "APIVER_ROOT_PREFIX is not set — apiver doesn't know the absolute URL path every "
             "version mounts under (ADR 0007 item 3)."
         )
@@ -1117,7 +1174,7 @@ def write_alias(name: str, *, from_version: str) -> Path:
     # legible "you can't alias an alias" (ticket #53).
     configured_aliases: list[str] = getattr(settings, "APIVER_ALIASES", [])
     if from_version in configured_aliases:
-        raise MigrateError(
+        raise InitError(
             f"--from {from_version!r} names an alias (APIVER_ALIASES), not a Version — an alias "
             "cannot target another alias."
         )
@@ -1126,22 +1183,22 @@ def write_alias(name: str, *, from_version: str) -> Path:
     try:
         from_registry_module = import_module(from_registry_dotted)
     except ImportError as exc:
-        raise MigrateError(
+        raise InitError(
             f"{from_registry_dotted!r} could not be imported: {exc}. `--from` must name a version "
             "that has already been mounted, so its registry.py already exists."
         ) from exc
     from_version_obj = getattr(from_registry_module, from_version, None)
     if not isinstance(from_version_obj, Version):
-        raise MigrateError(f"{from_registry_dotted}.{from_version} is not a Version instance.")
+        raise InitError(f"{from_registry_dotted}.{from_version} is not a Version instance.")
 
     if not _already_mounted(from_version, root_dir=root_dir):
-        raise MigrateError(
+        raise InitError(
             f"{from_version!r} is not mounted in the Aggregation Root — only an already-mounted "
             "version can be aliased."
         )
     if _already_mounted(name, root_dir=root_dir):
         aggregation_path = _resolve_target_dir(root_dir) / "urls.py"
-        raise MigrateError(f"{name!r} is already mounted in {aggregation_path}.")
+        raise InitError(f"{name!r} is already mounted in {aggregation_path}.")
 
     alias_prefix = root_prefix + f"{name}/"
     return _extend_aggregation_root_with_alias(

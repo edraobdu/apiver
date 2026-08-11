@@ -2,7 +2,7 @@
 
 A standalone script, not a `manage.py` subcommand, so offline tooling can
 introspect a project without importing the whole thing (spec item 66).
-`manifest`, `migrate`, `mount`, and `alias` still need
+`manifest`, `init`, `mount`, and `alias` still need
 `DJANGO_SETTINGS_MODULE` resolved, exactly as any other Django-adjacent CLI
 (celery, gunicorn) requires, since they build from live `Version`/`Alias`
 objects that only exist once Django settings are configured. Ticket #54
@@ -55,18 +55,18 @@ def _resolve_django_settings_module(settings_flag: str | None) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _cmd_migrate(*, prefix: str | None, manifest_path: str | None) -> int:
-    from .drf.migrate import MigrateError, write_registry
+def _cmd_init(*, prefix: str | None, manifest_path: str | None) -> int:
+    from .drf.init import InitError, write_init
 
     try:
-        registry_path, aggregation_path = write_registry(prefix=prefix)
-    except MigrateError as exc:
+        registry_path, aggregation_path = write_init(prefix=prefix)
+    except InitError as exc:
         print(f"apiver: {exc}", file=sys.stderr)
         return 1
 
     print(f"wrote {registry_path}")
     print(f"wrote {aggregation_path}")
-    # Folded into migrate for the base version (ADR 0003 item 7) — the
+    # Folded into init for the base version (ADR 0003 item 7) — the
     # newly-written registry.py is what APIVER_VERSIONS must already point
     # at for this to succeed; a registration in settings has to precede
     # the file existing, exactly as `apiver manifest` already requires.
@@ -74,17 +74,17 @@ def _cmd_migrate(*, prefix: str | None, manifest_path: str | None) -> int:
 
 
 def _cmd_mount(*, version_name: str, from_version: str) -> int:
-    from .drf.migrate import MigrateError, write_mount
+    from .drf.init import InitError, write_mount
 
     try:
         registry_path, aggregation_path = write_mount(version_name, from_version=from_version)
-    except MigrateError as exc:
+    except InitError as exc:
         print(f"apiver: {exc}", file=sys.stderr)
         return 1
 
     print(f"wrote {registry_path}")
     print(f"wrote {aggregation_path}")
-    # Unlike migrate (folded into APIVER_VERSIONS ahead of the base
+    # Unlike init (folded into APIVER_VERSIONS ahead of the base
     # version's registry.py existing), mount has nothing to check this
     # against — the new version isn't live yet, so a forgotten settings
     # edit fails silently at request time rather than here.
@@ -93,11 +93,11 @@ def _cmd_mount(*, version_name: str, from_version: str) -> int:
 
 
 def _cmd_alias(*, name: str, from_version: str) -> int:
-    from .drf.migrate import MigrateError, write_alias
+    from .drf.init import InitError, write_alias
 
     try:
         aggregation_path = write_alias(name, from_version=from_version)
-    except MigrateError as exc:
+    except InitError as exc:
         print(f"apiver: {exc}", file=sys.stderr)
         return 1
 
@@ -179,19 +179,20 @@ def main(argv: list[str] | None = None) -> int:
         help="Where to read/write apiver.toml (default: ./apiver.toml).",
     )
 
-    migrate_parser = subparsers.add_parser(
-        "migrate",
-        help="Adopt an existing project as the base version: generate registry.py and the manifest, "
-        "moving nothing.",
+    init_parser = subparsers.add_parser(
+        "init",
+        help="Start the base version: adopt an existing project's routes under --prefix if there are "
+        "any, or scaffold a route-less one if there aren't — generating registry.py and the "
+        "manifest, moving nothing.",
     )
-    migrate_parser.add_argument(
+    init_parser.add_argument(
         "--prefix",
         default=None,
         help="Only routes under this absolute path are adopted (e.g. api/) — excludes admin/, "
         "third-party auth urls, and anything else outside the API surface. Defaults to "
         "APIVER_ROOT_PREFIX when unset.",
     )
-    migrate_parser.add_argument(
+    init_parser.add_argument(
         "--manifest-path",
         default=None,
         help="Where to write apiver.toml (default: ./apiver.toml).",
@@ -271,8 +272,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "manifest":
         return _cmd_manifest(check=args.check, path=args.path)
-    if args.command == "migrate":
-        return _cmd_migrate(prefix=args.prefix, manifest_path=args.manifest_path)
+    if args.command == "init":
+        return _cmd_init(prefix=args.prefix, manifest_path=args.manifest_path)
     if args.command == "mount":
         return _cmd_mount(version_name=args.version, from_version=args.from_version)
     if args.command == "alias":

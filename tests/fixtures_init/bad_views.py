@@ -1,4 +1,4 @@
-"""Adversarial handlers proving `apiver migrate` fails loudly instead of
+"""Adversarial handlers proving `apiver init` fails loudly instead of
 silently mis-emitting a broken registry.py (ticket 02's catalogued failure
 modes, ticket 17)."""
 

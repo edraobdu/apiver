@@ -479,7 +479,7 @@ class Version:
     def schema_route_name(self) -> str:
         """The `name=` this Version's own `schema_view()` registration
         should always use — the single source of that convention:
-        `apiver migrate` derives a discovered schema route's name from it,
+        `apiver init` derives a discovered schema route's name from it,
         and `docs_view()` below reverses it by name, rather than either
         duplicating the string format independently (ticket 22 finding: the
         two drifting out of sync is exactly how a Swagger/Redoc UI silently
@@ -516,7 +516,7 @@ class Version:
         with every route added or removed (ADR 0002 Consequences, ticket 10).
         Built as `APIVER_ROOT_PREFIX + f"{name}/"` — the one place that
         absolute string is defined (ADR 0007 item 6) — by whatever wires a
-        version's schema route; `apiver migrate` does this for the base
+        version's schema route; `apiver init` does this for the base
         version's generated `registry.py` today.
         The generator is built with `patterns=` scoped to exactly this
         Version's own mounted patterns — not the whole project's urlconf —

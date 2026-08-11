@@ -17,7 +17,7 @@ REST_FRAMEWORK = {
 }
 
 SPECTACULAR_SETTINGS = {
-    "TITLE": "apiver migrate fixture",
+    "TITLE": "apiver init fixture",
     "DESCRIPTION": "",
     "VERSION": "0.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
@@ -30,13 +30,13 @@ DATABASES = {
     }
 }
 
-ROOT_URLCONF = "tests.fixtures_migrate.urls"
+ROOT_URLCONF = "tests.fixtures_init.urls"
 
-# The parent package (tests/fixtures_migrate/api/) is committed; the leaf
-# (api/v1/, and api/urls.py) is what `apiver migrate` writes, and tests
+# The parent package (tests/fixtures_init/api/) is committed; the leaf
+# (api/v1/, and api/urls.py) is what `apiver init` writes, and tests
 # clean it up after themselves so the fixture tree stays pristine between
 # runs.
 APIVER_BASE_VERSION = "v1"
-APIVER_ROOT_DIR = "tests.fixtures_migrate.api"
+APIVER_ROOT_DIR = "tests.fixtures_init.api"
 APIVER_ROOT_PREFIX = "api/"
 APIVER_VERSIONS = ["v1"]

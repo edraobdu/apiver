@@ -1,7 +1,7 @@
 # Getting started: adopting apiver into an existing project
 
 This walks a project that already has a working DRF API through adopting apiver: installing it,
-running `apiver migrate` to adopt the existing API as the Base Version, and then authoring and
+running `apiver init` to adopt the existing API as the Base Version, and then authoring and
 mounting a second version as a Delta. It was written and then followed verbatim while converting
 `reference/` (issue #22) — every step below was actually executed against a real project, not
 copied from the design docs.
@@ -14,8 +14,8 @@ copied from the design docs.
 - Django REST Framework `~=3.18` and drf-spectacular `~=0.30`.
 - An existing DRF project whose API is reachable by recursively walking `ROOT_URLCONF` — plain
   `path()` entries, router-registered ViewSets with explicit `basename=`, and at most one
-  drf-spectacular `SpectacularAPIView`. (`apiver migrate` refuses to guess about anything it can't
-  cleanly classify — see "If migrate refuses" below.)
+  drf-spectacular `SpectacularAPIView`. (`apiver init` refuses to guess about anything it can't
+  cleanly classify — see "If init refuses" below.)
 
 ## 1. Install apiver
 
@@ -51,7 +51,7 @@ INSTALLED_APPS = [
 APIVER_ROOT_DIR = "api"  # dotted path to the package that will hold the aggregation root
 # and every version's own package
 APIVER_ROOT_PREFIX = "api/"  # absolute URL path every version mounts under
-APIVER_BASE_VERSION = "v1"  # the name migrate adopts the existing API as
+APIVER_BASE_VERSION = "v1"  # the name init adopts the existing API as
 APIVER_VERSIONS = ["v1"]  # plain list of Live version names — a hand-maintained fact,
 # not derived from anything on disk
 ```
@@ -61,10 +61,10 @@ APIVER_VERSIONS = ["v1"]  # plain list of Live version names — a hand-maintain
 distinctly even when, as here, they resolve to the same string (`"api"` vs. `"api/"`).
 
 Nothing here is auto-detected. If the project's existing API doesn't live under
-`APIVER_ROOT_PREFIX` already, pass `apiver migrate --prefix <path>` in the next step to say
+`APIVER_ROOT_PREFIX` already, pass `apiver init --prefix <path>` in the next step to say
 explicitly which pre-existing routes count as in scope for adoption.
 
-## 3. Run `apiver migrate`
+## 3. Run `apiver init`
 
 `apiver` is a standalone CLI, not a `manage.py` subcommand, so it needs Django settings resolved one
 way or another before it can run. Run it from the project root (same as `manage.py`) and `apiver`
@@ -73,8 +73,8 @@ from the env var, a top-level `--settings` flag, or `[tool.apiver].django_settin
 `./pyproject.toml` — checked in that order:
 
 ```console
-$ DJANGO_SETTINGS_MODULE=config.settings apiver migrate
-$ apiver --settings config.settings migrate
+$ DJANGO_SETTINGS_MODULE=config.settings apiver init
+$ apiver --settings config.settings init
 ```
 
 This walks the *live, resolved* `ROOT_URLCONF` under `APIVER_ROOT_PREFIX` (or `--prefix`, if
@@ -82,14 +82,19 @@ given), and — if every route it finds can be classified — writes two files:
 
 - `<APIVER_ROOT_DIR>/<APIVER_BASE_VERSION>/registry.py` — one `register()` call per discovered
   route, importing the *existing* serializers/views from wherever they already live. Nothing is
-  moved. This file is generated exactly once (migrate refuses to overwrite it on a second run) and
+  moved. This file is generated exactly once (init refuses to overwrite it on a second run) and
   is hand-editable afterwards, the same way `manage.py startapp` boilerplate is.
 - `<APIVER_ROOT_DIR>/urls.py` — the **Aggregation Root**: one `include()` per Live version, each
   carrying its own full absolute mount path (`path("api/v1/", include(v1.urls))`). This file, once
   generated, is meant to be extended in place (by a later `apiver mount`), not regenerated.
 
+`init` is the first command every project runs, whether it's adopting a pre-existing API or starting
+one from scratch: if nothing under `APIVER_ROOT_PREFIX`/`--prefix` is found to adopt, `init` still
+succeeds, producing a route-less Base Version wired with nothing but its own `schema/`/`docs/`
+routes — the same unconditional guarantee `mount` already gives every later version.
+
 Point the project's *actual* root `urls.py` at the Aggregation Root by appending one `include()` —
-adoption is additive, not a restructuring. Every route the project served before `migrate` ran keeps
+adoption is additive, not a restructuring. Every route the project served before `init` ran keeps
 serving, at exactly the paths it always has; nothing above this new line moves, and nothing needs to
 change to keep working:
 
@@ -107,7 +112,7 @@ The *new* surface this adds lives at `/api/v1/...` — the same handlers, reacha
 under a name. Nothing forces the old, unversioned paths to go away: adopting apiver is the moment a
 version gets a name, not the moment old clients get broken. Retiring the unversioned paths (if a
 project wants to at all) is a separate, deliberate decision the developer makes on their own
-timeline — not a side effect of running `migrate`.
+timeline — not a side effect of running `init`.
 
 ### The base version's schema and docs routes are automatically renamed
 
@@ -122,7 +127,7 @@ docs page could silently start rendering the newly-adopted schema instead of its
 status either way, wrong body.
 
 The Base Version *is* a new version, distinct from whatever pre-existing paths it was adopted from —
-so `migrate` gives its schema and docs routes their own, version-qualified names automatically,
+so `init` gives its schema and docs routes their own, version-qualified names automatically,
 rather than requiring a hand-edit after the fact. A discovered `SpectacularAPIView` is always named
 `f"{base_name}-schema"` (`"v1-schema"`), regardless of what the original route was named or whether
 it was named at all; a discovered `SpectacularSwaggerView`/`SpectacularRedocView` is named
@@ -136,9 +141,9 @@ v1.register("docs/", SpectacularSwaggerView.as_view(url_name="v1-schema"), name=
 v1.register("schema/", v1.schema_view(prefix="api/v1/"), name="v1-schema")
 ```
 
-### If migrate refuses
+### If init refuses
 
-`migrate` fails closed: if any in-scope route can't be classified or regenerated, it writes
+`init` fails closed: if any in-scope route can't be classified or regenerated, it writes
 *nothing* and reports every offending route at once, not just the first. Common reasons (each
 with a specific diagnostic message):
 
@@ -149,7 +154,7 @@ with a specific diagnostic message):
 - A namespaced `include()`, or `i18n_patterns()` at the root.
 - More than one drf-spectacular schema view under the prefix.
 
-Any of these can be registered by hand afterwards instead — `migrate` covers the common case, not
+Any of these can be registered by hand afterwards instead — `init` covers the common case, not
 every case.
 
 ## 4. Verify the base version
@@ -172,7 +177,7 @@ $ DJANGO_SETTINGS_MODULE=config.settings apiver mount v2 --from v1
 ```
 
 This generates `api/v2/registry.py` from scratch — refusing if it already exists, the same
-one-shot-scaffold posture `migrate` already has for the Base Version's generated file — and appends
+one-shot-scaffold posture `init` already has for the Base Version's generated file — and appends
 `v2`'s `include()` to the Aggregation Root, at `APIVER_ROOT_PREFIX + "v2/"`:
 
 ```python
@@ -258,7 +263,7 @@ $ DJANGO_SETTINGS_MODULE=config.settings python manage.py check
 $ DJANGO_SETTINGS_MODULE=config.settings apiver manifest
 ```
 
-`apiver manifest` (also run automatically at the end of `migrate`, but not `mount`) writes
+`apiver manifest` (also run automatically at the end of `init`, but not `mount`) writes
 `apiver.toml`, a committed, non-authoritative snapshot of every Live version's resolution table —
 useful for `apiver versions`, which prints lineage/frozen/lifecycle/alias state without booting the
 project at all.
@@ -275,12 +280,12 @@ what doesn't work the first time.
   range fails at dependency resolution with a fairly clear `uv` error, but nothing in apiver itself
   says "check your Django version" up front — now called out in this guide's Prerequisites rather
   than a step someone has to discover by resolver failure.
-- **The root package didn't exist yet before `migrate` could write into it.** `_resolve_target_dir`
+- **The root package didn't exist yet before `init` could write into it.** `_resolve_target_dir`
   only ever imported the *parent* of the path it was about to create, so a brand-new adoption's
   `APIVER_ROOT_DIR` package didn't exist yet by definition, and the resulting
   `ModuleNotFoundError: No module named 'api'` pointed at the right name but not at the right fix. A
   developer adopting apiver should never have to `mkdir`/`touch __init__.py` themselves before the one
-  command whose entire job is adopting their project — **fixed in the library**: `migrate` and `mount`
+  command whose entire job is adopting their project — **fixed in the library**: `init` and `mount`
   now create `APIVER_ROOT_DIR`'s own package on disk if it isn't there yet
   (`_ensure_root_dir_exists`), with a regression test proving it against a project that has never run
   apiver at all.
@@ -294,7 +299,7 @@ what doesn't work the first time.
 - **The first instinct is to over-adopt.** The first pass at this guide had the project's root
   `urls.py` replaced wholesale with a single `include()`, on the reasoning that the versioned surface
   should be the *only* surface going forward — which meant rewriting every existing test's hard-coded
-  path for no reason a real adoption would ever require. Corrected: `migrate` is additive. It doesn't
+  path for no reason a real adoption would ever require. Corrected: `init` is additive. It doesn't
   move, replace, or deprecate anything that already works; it adds a second, versioned way to reach
   the same handlers, appended to the existing root `urls.py` rather than substituted for it.
   `reference/`'s own pre-existing tests needed zero changes as a result.
@@ -304,7 +309,7 @@ what doesn't work the first time.
   collided with the pre-existing project's own identically-named `schema`/`docs` routes, and Django's
   `reverse()` picked the new one — same HTTP status, silently wrong body. Caught only by asserting the
   actual embedded target URL, not just that the page rendered. **Fixed in the library**, not just
-  documented: `migrate` now gives a discovered schema route a version-qualified name
+  documented: `init` now gives a discovered schema route a version-qualified name
   (`f"{base_name}-schema"`) unconditionally, and repoints every discovered Swagger/Redoc view's
   `url_name` at it — the Base Version is a genuinely new version, so it shouldn't share a name with
   whatever it was adopted from, any more than an authored version would (see "The base version's
@@ -312,7 +317,7 @@ what doesn't work the first time.
   `reference/`'s HTTP tests assert the qualified names/targets directly.
 - **The version-suffix rule has no "but it didn't actually change" exception**, and this surfaces in
   two non-obvious places: overriding the *inherited* schema/docs routes (which need `override()`,
-  since `migrate` already registered them on the Base Version), and re-registering a handler at a new
+  since `init` already registered them on the Base Version), and re-registering a handler at a new
   key with identical behavior (a URL-prefix move) or a third-party class this project doesn't own
   (`SpectacularSwaggerView`). Both need a trivial version-suffixed subclass purely to satisfy the
   rule — now called out explicitly in step 5 above rather than left to the (accurate, but easy to
