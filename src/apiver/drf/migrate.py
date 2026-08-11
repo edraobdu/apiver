@@ -2,7 +2,10 @@
 `registry.py`, mounting it into the Aggregation Root (ticket 17, ADR 0003
 items 3-4, 7; ticket 43, ADR 0007). `apiver mount` (`write_mount`) shares
 this module: it mounts every later, hand-authored version into that same
-Aggregation Root, appending rather than generating from scratch.
+Aggregation Root, appending rather than generating from scratch — and, if
+the version doesn't already have its own schema override, appends one to
+its `registry.py` too, wired from whatever ancestor's schema Registration
+it can inherit a key/name from (ticket #47).
 
 Generates wiring only — it never moves a file. The existing
 `serializers.py`/`views.py` stay wherever the pre-existing project already
@@ -45,7 +48,7 @@ from django.urls.resolvers import LocalePrefixPattern, RegexPattern
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 from rest_framework.routers import APIRootView
 
-from .version import Version
+from .version import Registration, Version
 
 _FORMAT_SUFFIX_RE = re.compile(r"\(\?P<format>|drf_format_suffix")
 _MAX_DEPTH = 64
@@ -772,11 +775,95 @@ def _write_or_extend_aggregation_root(version_name: str, *, root_dir: str, mount
     return aggregation_path
 
 
-def write_mount(version_name: str) -> Path:
-    """`apiver mount`'s full flow: append an already-authored version's
-    `include()` to the Aggregation Root (ADR 0007 item 7). Never touches
-    `settings.py` — adding `version_name` to `APIVER_VERSIONS` stays a
-    hand-edit, consistent with `migrate` only ever reading settings.
+def _own_schema_registration(version: Version) -> Registration | None:
+    """The Registration `version` itself made for its own schema route, if
+    any — `version.schema_route_name` is the single source of that naming
+    convention (`Version.schema_route_name`'s docstring, ticket 22
+    finding), so a Registration only counts if its `name` matches it
+    exactly, rather than merely occupying whatever key the route happens to
+    use."""
+    return next(
+        (
+            registration
+            for registration in version._registrations.values()
+            if registration.kind == "view" and registration.name == version.schema_route_name
+        ),
+        None,
+    )
+
+
+def _inherited_schema_registration(version: Version) -> Registration | None:
+    """Walk `version`'s ancestors, nearest first, for the first one that
+    wired its own schema route (ticket #47 item 3) — the key/name `apiver
+    mount` should reuse for `version`'s own override, rather than
+    inventing new ones. Returns None when no ancestor ever wired a schema
+    route at all, the no-parent-schema-registration case ticket #47 leaves
+    to be silently skipped, the same posture `discover()` already takes
+    when a migrated project's urlconf has no schema route to find."""
+    node = version.parent
+    while node is not None:
+        found = _own_schema_registration(node)
+        if found is not None:
+            return found
+        node = node.parent
+    return None
+
+
+def _write_schema_override(
+    version_name: str, version_obj: Version, *, registry_path: Path, mount_prefix: str
+) -> Path | None:
+    """Append `{version_name}.override(...)` wiring the target version's own
+    schema route into its `registry.py` (ticket #47) — every version needs
+    its *own* `schema_view(prefix=...)`; an unoverridden 'schema' key would
+    keep resolving through the parent's Registration unchanged, silently
+    serving the parent's schema document under the child's own path (ADR
+    0007 item 6).
+
+    Read from the live, already-imported `version_obj` rather than
+    regex-matching `registry.py`'s text (ADR 0002 item 5's "code is
+    authoritative" applies here too): a hand-written override that already
+    satisfies `version_obj.schema_route_name` makes this a no-op, the same
+    append-once posture `_write_or_extend_aggregation_root` already has for
+    the Aggregation Root. Returns None, writing nothing, in that case, or
+    when no ancestor ever wired a schema route to inherit the key from.
+
+    The override's `name=` is always `version_obj.schema_route_name`
+    (always `"schema"` for a version with a parent), *not* the inherited
+    Registration's own name — an authored version gets its own Django
+    instance namespace for free, so its schema route stays registered
+    under the plain, un-qualified `"schema"` every authored version uses,
+    never a name it copies from an ancestor (`Version.schema_route_name`'s
+    docstring).
+    """
+    if _own_schema_registration(version_obj) is not None:
+        return None
+
+    inherited = _inherited_schema_registration(version_obj)
+    if inherited is None:
+        return None
+
+    source = registry_path.read_text()
+    if source and not source.endswith("\n"):
+        source += "\n"
+    line = (
+        f"{version_name}.override({inherited.key!r}, "
+        f"{version_name}.schema_view(prefix={mount_prefix!r}), name={version_obj.schema_route_name!r})\n"
+    )
+    registry_path.write_text(source + line)
+    return registry_path
+
+
+def write_mount(version_name: str) -> tuple[Path | None, Path]:
+    """`apiver mount`'s full flow: wire an authored version's own schema
+    route into its `registry.py` (ticket #47) if it doesn't have one
+    already, then append its `include()` to the Aggregation Root (ADR 0007
+    item 7). Never touches `settings.py` — adding `version_name` to
+    `APIVER_VERSIONS` stays a hand-edit, consistent with `migrate` only
+    ever reading settings.
+
+    Returns `(registry_path, aggregation_path)` — `registry_path` is None
+    when the schema override was skipped (ticket #47's idempotency and
+    no-ancestor-schema cases; see `_write_schema_override`).
     """
     if not version_name.isidentifier():
         raise MigrateError(
@@ -811,9 +898,15 @@ def write_mount(version_name: str) -> Path:
     if not isinstance(version_obj, Version):
         raise MigrateError(f"{registry_dotted}.{version_name} is not a Version instance.")
 
-    return _write_or_extend_aggregation_root(
-        version_name, root_dir=root_dir, mount_prefix=root_prefix + f"{version_name}/"
+    mount_prefix = root_prefix + f"{version_name}/"
+    schema_registry_path = _write_schema_override(
+        version_name, version_obj, registry_path=Path(registry_module.__file__), mount_prefix=mount_prefix
     )
+
+    aggregation_path = _write_or_extend_aggregation_root(
+        version_name, root_dir=root_dir, mount_prefix=mount_prefix
+    )
+    return schema_registry_path, aggregation_path
 
 
 def write_registry(*, prefix: str | None) -> tuple[Path, Path]:

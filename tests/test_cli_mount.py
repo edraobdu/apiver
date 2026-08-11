@@ -15,6 +15,8 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures_mount"
 AGGREGATION_ROOT = FIXTURE_ROOT / "api" / "urls.py"
+V2_REGISTRY = FIXTURE_ROOT / "api" / "v2" / "registry.py"
+V3_REGISTRY = FIXTURE_ROOT / "api" / "v3" / "registry.py"
 
 
 def _run(*args: str) -> subprocess.CompletedProcess:
@@ -35,6 +37,17 @@ def _clean_aggregation_root():
     AGGREGATION_ROOT.unlink(missing_ok=True)
     yield
     AGGREGATION_ROOT.unlink(missing_ok=True)
+
+
+@pytest.fixture(autouse=True)
+def _restore_v2_registry():
+    # Mounting v2 now writes its own schema override into registry.py
+    # (ticket #47), unlike every other mount test's `api/urls.py`-only
+    # side effect — autouse, so every test starts from the hand-authored
+    # fixture, not whatever an earlier test's mount left behind.
+    original = V2_REGISTRY.read_text()
+    yield
+    V2_REGISTRY.write_text(original)
 
 
 def test_mount_seeds_the_aggregation_root_as_the_first_mount():
@@ -109,6 +122,50 @@ def test_mount_requires_apiver_root_dir(tmp_path):
     assert result.returncode != 0
     assert "APIVER_ROOT_DIR" in result.stderr
     assert not AGGREGATION_ROOT.exists()
+
+
+def test_mount_wires_an_authored_versions_own_schema_override():
+    """v2 derives from v1, which already has a 'schema' Registration
+    (ticket #47) — mount should append v2's own override, reusing v1's
+    'schema/' key but always naming it 'schema' (Version.schema_route_name
+    for a version with a parent)."""
+    result = _run("v2")
+
+    assert result.returncode == 0, result.stderr
+    assert f"wrote {V2_REGISTRY}" in result.stdout
+    source = V2_REGISTRY.read_text()
+    assert "v2.override('schema/', v2.schema_view(prefix='api/v2/'), name='schema')" in source
+
+
+def test_mount_does_not_duplicate_an_already_present_schema_override():
+    first = _run("v2")
+    assert first.returncode == 0, first.stderr
+    written = V2_REGISTRY.read_text()
+
+    # Only the aggregation root refuses a second mount of the same version
+    # (already-mounted check); removing it lets a second run reach the
+    # schema-override step again, against a registry.py that already has
+    # its own override from the first run.
+    AGGREGATION_ROOT.unlink()
+
+    second = _run("v2")
+
+    assert second.returncode == 0, second.stderr
+    assert f"wrote {V2_REGISTRY}" not in second.stdout
+    assert V2_REGISTRY.read_text() == written
+
+
+def test_mount_skips_the_schema_override_when_no_ancestor_has_one():
+    """v3 has no parent and no schema Registration of its own — there is
+    nothing to inherit a key/name from, so mount silently skips writing a
+    schema override (ticket #47's no-ancestor-schema-registration case)."""
+    original = V3_REGISTRY.read_text()
+
+    result = _run("v3")
+
+    assert result.returncode == 0, result.stderr
+    assert f"wrote {V3_REGISTRY}" not in result.stdout
+    assert V3_REGISTRY.read_text() == original
 
 
 def test_mount_requires_django_settings_module():
