@@ -1,0 +1,90 @@
+"""The directory-shape system check (ticket 15, ADR 0003 items 1-3).
+
+Layout enforcement is split across two mechanisms on purpose (ADR 0003 item
+2): version-suffixed class names are checked at `register()`/`override()`
+time in `version.py`, because that call already holds the class object.
+Directory shape has no equivalent moment — nothing at import time reveals
+which file a `register()` call was made from short of walking the caller's
+stack frame — so it runs instead as an ordinary Django system check, which
+`manage.py check`/CI already run without apiver asking for anything special.
+
+A project names its version roots explicitly via two settings, since apiver
+has no other way to learn a version's intended directory without walking a
+live registry that doesn't exist until ticket 19:
+
+- `APIVER_VERSION_ROOTS`: `{version_name: "dotted.module.path"}` for every
+  version that has a root package on disk.
+- `APIVER_BASE_VERSION`: the one entry in `APIVER_VERSION_ROOTS` (if any)
+  that names the Base Version. Its root is exempt from carrying
+  `serializers.py`/`views.py` (ADR 0003 item 3) — those stay wherever the
+  pre-existing project already put them.
+"""
+
+from importlib import import_module
+from pathlib import Path
+
+from django.conf import settings
+from django.core.checks import Error, register
+
+AUTHORED_REQUIRED_FILES = ("serializers.py", "views.py", "registry.py")
+BASE_REQUIRED_FILES = ("registry.py",)
+
+
+@register()
+def check_version_layout(app_configs=None, **kwargs) -> list[Error]:
+    version_roots: dict[str, str] = getattr(settings, "APIVER_VERSION_ROOTS", {})
+    base_version = getattr(settings, "APIVER_BASE_VERSION", None)
+
+    messages: list[Error] = []
+    for name, module_path in version_roots.items():
+        is_base = name == base_version
+        messages.extend(_check_root(name, module_path, is_base=is_base))
+    return messages
+
+
+def _check_root(name: str, module_path: str, *, is_base: bool) -> list[Error]:
+    try:
+        module = import_module(module_path)
+    except ImportError as exc:
+        return [
+            Error(
+                f"version {name!r}'s root {module_path!r} could not be imported: {exc}",
+                id="apiver.E001",
+            )
+        ]
+
+    root_dir = getattr(module, "__path__", None)
+    if root_dir is None:
+        return [
+            Error(
+                f"version {name!r}'s root {module_path!r} is a module, not a package — "
+                "a version root must be a package directory (ADR 0003 item 1).",
+                id="apiver.E001",
+            )
+        ]
+    root_dir = Path(next(iter(root_dir)))
+
+    required = BASE_REQUIRED_FILES if is_base else AUTHORED_REQUIRED_FILES
+    messages = [
+        Error(
+            f"version {name!r}'s root {module_path!r} is missing {filename!r}"
+            + ("" if is_base else " (ADR 0003 item 1)"),
+            id="apiver.E002",
+        )
+        for filename in required
+        if not (root_dir / filename).is_file()
+    ]
+
+    if not is_base:
+        messages.extend(
+            Error(
+                f"version {name!r}'s root {module_path!r} contains a subpackage "
+                f"{entry.name!r} — apiver uses a flat per-version layout with no "
+                "package-per-resource subpackaging (ADR 0003 item 1).",
+                id="apiver.E003",
+            )
+            for entry in sorted(root_dir.iterdir())
+            if entry.is_dir() and entry.name != "__pycache__"
+        )
+
+    return messages
