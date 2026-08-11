@@ -48,12 +48,12 @@ INSTALLED_APPS = [
 ## 2. Add the four settings
 
 ```python
-APIVER_ROOT_DIR = "api"       # dotted path to the package that will hold the aggregation root
-                               # and every version's own package
-APIVER_ROOT_PREFIX = "api/"   # absolute URL path every version mounts under
-APIVER_BASE_VERSION = "v1"    # the name migrate adopts the existing API as
-APIVER_VERSIONS = ["v1"]      # plain list of Live version names — a hand-maintained fact,
-                               # not derived from anything on disk
+APIVER_ROOT_DIR = "api"  # dotted path to the package that will hold the aggregation root
+# and every version's own package
+APIVER_ROOT_PREFIX = "api/"  # absolute URL path every version mounts under
+APIVER_BASE_VERSION = "v1"  # the name migrate adopts the existing API as
+APIVER_VERSIONS = ["v1"]  # plain list of Live version names — a hand-maintained fact,
+# not derived from anything on disk
 ```
 
 `APIVER_ROOT_DIR` is a *filesystem* fact (where the generated packages live) and
@@ -95,7 +95,6 @@ change to keep working:
 urlpatterns = [
     path("api/users/", include("users.urls")),
     # ...however much pre-existing routing the project already had...
-
     # apiver's Aggregation Root (ADR 0007 item 2), appended, not substituted:
     path("", include("api.urls")),
 ]
@@ -129,9 +128,9 @@ schema name:
 
 ```python
 # api/v1/registry.py — generated, not hand-edited
-v1.register('docs/', SpectacularSwaggerView.as_view(url_name='v1-schema'), name='v1-docs')
+v1.register("docs/", SpectacularSwaggerView.as_view(url_name="v1-schema"), name="v1-docs")
 ...
-v1.register('schema/', v1.schema_view(prefix='api/v1/'), name='v1-schema')
+v1.register("schema/", v1.schema_view(prefix="api/v1/"), name="v1-schema")
 ```
 
 ### If migrate refuses
