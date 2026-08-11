@@ -1,5 +1,8 @@
 """`apiver migrate`: walk the live URLconf and generate the base version's
-`registry.py` (ticket 17, ADR 0003 items 3-4, 7).
+`registry.py`, mounting it into the Aggregation Root (ticket 17, ADR 0003
+items 3-4, 7; ticket 43, ADR 0007). `apiver mount` (`write_mount`) shares
+this module: it mounts every later, hand-authored version into that same
+Aggregation Root, appending rather than generating from scratch.
 
 Generates wiring only — it never moves a file. The existing
 `serializers.py`/`views.py` stay wherever the pre-existing project already
@@ -39,6 +42,7 @@ from typing import Any
 from django.conf import settings
 from django.urls import URLPattern, URLResolver
 from django.urls.resolvers import LocalePrefixPattern, RegexPattern
+from drf_spectacular.views import SpectacularAPIView
 from rest_framework.routers import APIRootView
 
 from .version import Version
@@ -73,11 +77,16 @@ class RegistrationPlan:
     """One `register()` call migrate will emit."""
 
     key: str
-    kind: str  # "viewset" | "view"
+    kind: str  # "viewset" | "view" | "schema"
     module: str
     symbol: str
     basename: str | None = None
     name: str | None = None
+    # Set only for kind == "schema" — the absolute mount prefix passed to
+    # `schema_view(prefix=...)` (ADR 0007 item 6). `module`/`symbol` are
+    # unused for this kind: there is nothing to import, the handler is
+    # `{var_name}.schema_view(prefix=...)` itself.
+    schema_prefix: str | None = None
 
 
 @dataclass
@@ -286,9 +295,24 @@ def _derive_router_prefix(
     return None
 
 
-def discover(root_patterns: Any, *, prefix: str) -> DiscoveryResult:
+def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str) -> DiscoveryResult:
     """Walk `root_patterns` (a URLconf's `urlpatterns` list), classify
     every in-scope route, and turn it into a plan for `Version.register()`.
+
+    `schema_mount_prefix` is the base version's full absolute mount path
+    (`APIVER_ROOT_PREFIX + f"{base_name}/"`) — known at migrate time since
+    ADR 0007 makes it a settings-time fact. It is only ever used to build a
+    `schema_view(prefix=...)` plan for a discovered `SpectacularAPIView`
+    (ticket #40): the naive `register('schema/', SpectacularAPIView, ...)`
+    apiver used to emit is silently wrong the moment a second version
+    exists, since that view scans the whole `ROOT_URLCONF` unscoped and
+    would start leaking sibling versions' routes.
+
+    `SpectacularSwaggerView`/`SpectacularRedocView` need no equivalent
+    special-casing: they never scan the urlconf themselves, only
+    `reverse()` the schema route's own `url_name` at request time, so the
+    ordinary discovery-and-reimport path below already emits correct
+    wiring for them.
 
     Returns diagnostics for anything that could not be classified or
     regenerated rather than raising immediately — every offending route is
@@ -355,6 +379,57 @@ def discover(root_patterns: Any, *, prefix: str) -> DiscoveryResult:
             RegistrationPlan(key=key, kind="viewset", module=module, symbol=symbol, basename=basename)
         )
 
+    schema_endpoints = []
+    other_endpoints = []
+    for endpoint in view_endpoints:
+        if endpoint.cls is not None and issubclass(endpoint.cls, SpectacularAPIView):
+            schema_endpoints.append(endpoint)
+        else:
+            other_endpoints.append(endpoint)
+    view_endpoints = other_endpoints
+
+    if len(schema_endpoints) > 1:
+        diagnostics.append(
+            f"{len(schema_endpoints)} drf-spectacular schema views found under prefix {prefix!r} "
+            f"({', '.join(sorted(e.path for e in schema_endpoints))}) — migrate can only auto-wire a "
+            "single schema endpoint per version (ticket #40). Remove the extras, or register them by "
+            "hand with Version.schema_view(prefix=...)."
+        )
+    elif schema_endpoints:
+        endpoint = schema_endpoints[0]
+        if endpoint.cls is not SpectacularAPIView:
+            diagnostics.append(
+                f"{endpoint.path!r} is served by {endpoint.cls.__module__}.{endpoint.cls.__qualname__}, "
+                "a drf-spectacular schema view subclass (e.g. SpectacularYAMLAPIView/"
+                "SpectacularJSONAPIView) — migrate only auto-wires the exact, content-negotiated "
+                "SpectacularAPIView (ticket #40). Register it by hand with "
+                "Version.schema_view(prefix=...)."
+            )
+        elif endpoint.url_name is None:
+            diagnostics.append(
+                f"{endpoint.path!r} has no url `name=` — register() requires an explicit name= for "
+                "non-ViewSet handlers, since there is no router to derive one from (ADR 0002 item 3)."
+            )
+        elif endpoint.is_regex_declared:
+            diagnostics.append(
+                f"{endpoint.path!r} was declared with re_path(), not path() — apiver's register() "
+                "always re-emits explicit views as path() entries, which cannot express an arbitrary "
+                "regex (ticket 02 §3.5). Convert it to path() first, or register it by hand."
+            )
+        else:
+            key = _relative(prefix, endpoint.path)
+            groups[key] = [endpoint]
+            plans.append(
+                RegistrationPlan(
+                    key=key,
+                    kind="schema",
+                    module="",
+                    symbol="",
+                    name=endpoint.url_name,
+                    schema_prefix=schema_mount_prefix,
+                )
+            )
+
     for endpoint in sorted(view_endpoints, key=lambda e: e.path):
         if endpoint.url_name is None:
             diagnostics.append(
@@ -384,7 +459,15 @@ def discover(root_patterns: Any, *, prefix: str) -> DiscoveryResult:
             RegistrationPlan(key=key, kind="view", module=module, symbol=symbol, name=endpoint.url_name)
         )
 
-    return DiscoveryResult(plans=sorted(plans, key=lambda p: p.key), diagnostics=diagnostics, _groups=groups)
+    # A "schema" plan must be emitted last: `schema_view()` snapshots
+    # `self.urls` the moment it's called, so it only sees whatever was
+    # registered before it — every other registration has to land first for
+    # the generated schema to describe the version's complete surface.
+    return DiscoveryResult(
+        plans=sorted(plans, key=lambda p: (p.kind == "schema", p.key)),
+        diagnostics=diagnostics,
+        _groups=groups,
+    )
 
 
 def verify(result: DiscoveryResult, *, base_name: str) -> list[str]:
@@ -402,8 +485,11 @@ def verify(result: DiscoveryResult, *, base_name: str) -> list[str]:
     version = Version(base_name)
     try:
         for plan in result.plans:
-            module = import_module(plan.module)
-            handler = getattr(module, plan.symbol)
+            if plan.kind == "schema":
+                handler = version.schema_view(prefix=plan.schema_prefix)
+            else:
+                module = import_module(plan.module)
+                handler = getattr(module, plan.symbol)
             if plan.kind == "viewset":
                 version.register(plan.key, handler, basename=plan.basename)
             else:
@@ -437,7 +523,8 @@ def render_registry(plans: list[RegistrationPlan], *, base_name: str, var_name: 
     """
     imports: dict[str, list[str]] = {}
     for plan in plans:
-        imports.setdefault(plan.module, []).append(plan.symbol)
+        if plan.kind != "schema":  # no import needed — the handler is {var_name}.schema_view(...)
+            imports.setdefault(plan.module, []).append(plan.symbol)
 
     import_lines = [
         f"from {module} import {', '.join(sorted(set(symbols)))}"
@@ -449,6 +536,11 @@ def render_registry(plans: list[RegistrationPlan], *, base_name: str, var_name: 
         if plan.kind == "viewset":
             register_lines.append(
                 f"{var_name}.register({plan.key!r}, {plan.symbol}, basename={plan.basename!r})"
+            )
+        elif plan.kind == "schema":
+            register_lines.append(
+                f"{var_name}.register({plan.key!r}, {var_name}.schema_view(prefix={plan.schema_prefix!r}), "
+                f"name={plan.name!r})"
             )
         else:
             register_lines.append(f"{var_name}.register({plan.key!r}, {plan.symbol}, name={plan.name!r})")
@@ -485,19 +577,166 @@ def _resolve_target_dir(module_path: str) -> Path:
     return Path(next(iter(parent_dir))) / leaf
 
 
-def write_registry(*, prefix: str) -> Path:
+def render_aggregation_root(mounts: list[tuple[str, str]], *, root_dir: str) -> str:
+    """Render the Aggregation Root's `urls.py` source (ADR 0007 item 2):
+    one `include()` per Live Version, each already carrying its full
+    absolute mount path. `mounts` is `[(version_name, absolute_prefix),
+    ...]`, in the order they should appear.
+
+    Used to render the *initial* file only — by `migrate` for the base
+    version, or by `apiver mount` seeding the very first mount in a
+    greenfield project. Every mount after that is appended in place by
+    `_write_or_extend_aggregation_root`, never re-rendered from scratch, so
+    a developer's hand edits to this file survive.
+    """
+    import_lines = [f"from {root_dir}.{name}.registry import {name}" for name, _ in mounts]
+    mount_lines = [f"    path({prefix!r}, include({name}.urls))," for name, prefix in mounts]
+    lines = [
+        '"""Generated by `apiver migrate`; extended in place by `apiver mount`',
+        "as later versions are authored (ADR 0007 item 2). Hand-editable in",
+        "between — apiver only ever appends a new version's mount here, never",
+        'rewrites an existing line."""',
+        "",
+        "from django.urls import include, path",
+        "",
+        *import_lines,
+        "",
+        "urlpatterns = [",
+        *mount_lines,
+        "]",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _already_mounted(version_name: str, *, root_dir: str) -> bool:
+    aggregation_path = _resolve_target_dir(root_dir) / "urls.py"
+    if not aggregation_path.is_file():
+        return False
+    return re.search(rf"include\({re.escape(version_name)}\.urls\)", aggregation_path.read_text()) is not None
+
+
+def _write_or_extend_aggregation_root(version_name: str, *, root_dir: str, mount_prefix: str) -> Path:
+    """Mount `version_name` into `<root_dir>/urls.py`, creating the
+    Aggregation Root (and its package, if needed) on the very first call —
+    shared by `migrate` (the base version's initial mount, ADR 0007 item 7)
+    and `apiver mount` (every authored version after, including as the
+    first-ever mount in a greenfield project that never ran migrate).
+
+    An existing file is extended by text insertion, not regenerated from
+    `render_aggregation_root` — the file is meant to be hand-editable
+    in between apiver's own appends (ADR 0007 item 2), so a developer's
+    edits to earlier entries must survive. Refuses loudly, writing nothing,
+    if the file has drifted from the shape apiver itself generates: there
+    is no way to safely locate an insertion point in an unrecognized file
+    without risking a silently broken urls.py.
+    """
+    root_dir_path = _resolve_target_dir(root_dir)
+    aggregation_path = root_dir_path / "urls.py"
+
+    if not aggregation_path.is_file():
+        root_dir_path.mkdir(parents=True, exist_ok=True)
+        init_file = root_dir_path / "__init__.py"
+        if not init_file.is_file():
+            init_file.write_text("")
+        aggregation_path.write_text(
+            render_aggregation_root([(version_name, mount_prefix)], root_dir=root_dir)
+        )
+        return aggregation_path
+
+    source = aggregation_path.read_text()
+    if re.search(rf"include\({re.escape(version_name)}\.urls\)", source):
+        raise MigrateError(f"{version_name!r} is already mounted in {aggregation_path}.")
+
+    lines = source.splitlines()
+    import_indices = [i for i, line in enumerate(lines) if line.startswith(("from ", "import "))]
+    if not import_indices:
+        raise MigrateError(
+            f"{aggregation_path} has no import statements to extend — has it been hand-edited into "
+            "an unrecognized shape?"
+        )
+    lines.insert(import_indices[-1] + 1, f"from {root_dir}.{version_name}.registry import {version_name}")
+
+    try:
+        open_idx = next(i for i, line in enumerate(lines) if line.strip() == "urlpatterns = [")
+    except StopIteration:
+        raise MigrateError(
+            f"{aggregation_path} has no `urlpatterns = [` list — has it been hand-edited into an "
+            "unrecognized shape?"
+        ) from None
+    try:
+        close_idx = next(i for i in range(open_idx + 1, len(lines)) if lines[i].strip() == "]")
+    except StopIteration:
+        raise MigrateError(
+            f"{aggregation_path}'s urlpatterns list has no closing `]` — has it been hand-edited into "
+            "an unrecognized shape?"
+        ) from None
+    lines.insert(close_idx, f"    path({mount_prefix!r}, include({version_name}.urls)),")
+
+    aggregation_path.write_text("\n".join(lines) + "\n")
+    return aggregation_path
+
+
+def write_mount(version_name: str) -> Path:
+    """`apiver mount`'s full flow: append an already-authored version's
+    `include()` to the Aggregation Root (ADR 0007 item 7). Never touches
+    `settings.py` — adding `version_name` to `APIVER_VERSIONS` stays a
+    hand-edit, consistent with `migrate` only ever reading settings.
+    """
+    if not version_name.isidentifier():
+        raise MigrateError(
+            f"{version_name!r} is not a valid Python identifier — it must match the module-level "
+            "variable name in the version's own registry.py."
+        )
+
+    root_dir = getattr(settings, "APIVER_ROOT_DIR", None)
+    if not root_dir:
+        raise MigrateError(
+            "APIVER_ROOT_DIR is not set — apiver doesn't know where the aggregation root lives "
+            "(ADR 0007 item 3)."
+        )
+    root_prefix = getattr(settings, "APIVER_ROOT_PREFIX", None)
+    if root_prefix is None:
+        raise MigrateError(
+            "APIVER_ROOT_PREFIX is not set — apiver doesn't know the absolute URL path every "
+            "version mounts under (ADR 0007 item 3)."
+        )
+    root_prefix = root_prefix.lstrip("/")
+
+    registry_dotted = f"{root_dir}.{version_name}.registry"
+    try:
+        registry_module = import_module(registry_dotted)
+    except ImportError as exc:
+        raise MigrateError(
+            f"{registry_dotted!r} could not be imported: {exc}. `apiver mount` expects the version's "
+            "registry.py to already exist — write it by hand first (ADR 0003 item 3), or run "
+            "`apiver migrate` first for the base version."
+        ) from exc
+    version_obj = getattr(registry_module, version_name, None)
+    if not isinstance(version_obj, Version):
+        raise MigrateError(f"{registry_dotted}.{version_name} is not a Version instance.")
+
+    return _write_or_extend_aggregation_root(
+        version_name, root_dir=root_dir, mount_prefix=root_prefix + f"{version_name}/"
+    )
+
+
+def write_registry(*, prefix: str | None) -> tuple[Path, Path]:
     """The full `apiver migrate` flow: resolve where to write, walk the
     live URLconf, classify and verify every in-scope route, then write
-    `registry.py` (ADR 0003 items 3-4, 7). Raises `MigrateError` — with
-    every offending route listed, not just the first — and writes nothing
-    at all if any route under `prefix` could not be classified,
-    regenerated, or verified.
+    `registry.py` and mount it into the Aggregation Root (ADR 0003 items
+    3-4, 7; ADR 0007 items 2, 7). Raises `MigrateError` — with every
+    offending route listed, not just the first — and writes nothing at all
+    if any route under `prefix` could not be classified, regenerated, or
+    verified.
+
+    Returns `(registry_path, aggregation_path)`.
     """
     base_name = getattr(settings, "APIVER_BASE_VERSION", None)
     if not base_name:
         raise MigrateError(
             "APIVER_BASE_VERSION is not set — apiver doesn't know which version `migrate` is adopting "
-            "the project as. Set it in settings, alongside APIVER_VERSION_ROOTS (ticket 15)."
+            "the project as. Set it in settings, alongside APIVER_ROOT_DIR (ADR 0007 item 3)."
         )
     if not base_name.isidentifier():
         raise MigrateError(
@@ -505,13 +744,32 @@ def write_registry(*, prefix: str) -> Path:
             "module-level variable name in the generated registry.py."
         )
 
-    module_path = getattr(settings, "APIVER_VERSION_ROOTS", {}).get(base_name)
-    if not module_path:
+    root_dir = getattr(settings, "APIVER_ROOT_DIR", None)
+    if not root_dir:
         raise MigrateError(
-            f"APIVER_VERSION_ROOTS[{base_name!r}] is not set — apiver doesn't know where to write "
-            "registry.py. Set it to the dotted path of the base version's root package."
+            "APIVER_ROOT_DIR is not set — apiver doesn't know where to write registry.py. Set it to "
+            "the dotted path of the aggregation root package (ADR 0007 item 3)."
         )
+    root_prefix = getattr(settings, "APIVER_ROOT_PREFIX", None)
+    if root_prefix is None:
+        raise MigrateError(
+            "APIVER_ROOT_PREFIX is not set — apiver doesn't know the absolute URL path every version "
+            "mounts under (ADR 0007 item 3)."
+        )
+    root_prefix = root_prefix.lstrip("/")
 
+    # `--prefix` — which pre-existing routes count as in scope for adoption
+    # — is a distinct fact from APIVER_ROOT_PREFIX, but defaults to it: the
+    # common case is that a project's whole pre-existing API already lives
+    # under the same absolute path apiver will keep mounting versions at.
+    if prefix is None:
+        prefix = root_prefix
+    # Discovered absolute paths never carry a leading "/" — path()/router
+    # declarations don't either — so a user-typed "/api/" is normalized the
+    # same as "api/".
+    prefix = prefix.lstrip("/")
+
+    module_path = f"{root_dir}.{base_name}"
     target_dir = _resolve_target_dir(module_path)
     registry_path = target_dir / "registry.py"
     if registry_path.is_file():
@@ -520,14 +778,18 @@ def write_registry(*, prefix: str) -> Path:
             "it (ADR 0003 item 4). Hand-edit it directly, or remove it first to regenerate from "
             "scratch."
         )
+    # Checked before anything is written, not just inside
+    # `_write_or_extend_aggregation_root` at the end — migrate must write
+    # nothing at all when it can't finish (ticket 02 recommendation #5),
+    # and a re-run after only registry.py was removed by hand is exactly
+    # the case where the aggregation root already has this mount.
+    if _already_mounted(base_name, root_dir=root_dir):
+        aggregation_path = _resolve_target_dir(root_dir) / "urls.py"
+        raise MigrateError(f"{base_name!r} is already mounted in {aggregation_path}.")
 
-    # Discovered absolute paths never carry a leading "/" — path()/router
-    # declarations don't either — so a user-typed "/api/" is normalized the
-    # same as "api/".
-    prefix = prefix.lstrip("/")
-
+    mount_prefix = root_prefix + f"{base_name}/"
     root_urlconf = import_module(settings.ROOT_URLCONF)
-    result = discover(root_urlconf.urlpatterns, prefix=prefix)
+    result = discover(root_urlconf.urlpatterns, prefix=prefix, schema_mount_prefix=mount_prefix)
     if result.diagnostics:
         raise MigrateError("\n".join(f"- {message}" for message in result.diagnostics))
     if not result.plans:
@@ -544,4 +806,8 @@ def write_registry(*, prefix: str) -> Path:
     if not init_file.is_file():
         init_file.write_text("")
     registry_path.write_text(source)
-    return registry_path
+
+    aggregation_path = _write_or_extend_aggregation_root(
+        base_name, root_dir=root_dir, mount_prefix=mount_prefix
+    )
+    return registry_path, aggregation_path

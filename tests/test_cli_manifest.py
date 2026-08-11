@@ -1,6 +1,6 @@
 """CLI seam (subprocess) for `apiver manifest`/`apiver manifest --check`
 (ticket 16). Invokes the entry point exactly as a user would, against the
-static fixture graph in tests/fixtures_manifest/registry.py."""
+static fixture graph in tests/fixtures_manifest/api/."""
 
 import os
 import subprocess

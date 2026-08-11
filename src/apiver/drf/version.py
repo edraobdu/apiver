@@ -491,6 +491,11 @@ class Version:
         version's absolute URLs for the generator and pins
         `SCHEMA_PATH_PREFIX` from it, since the auto-estimated prefix drifts
         with every route added or removed (ADR 0002 Consequences, ticket 10).
+        The recommended way to build it, in a hand-written `registry.py` or
+        anywhere else, is `APIVER_ROOT_PREFIX + f"{name}/"` — the same
+        expression `apiver migrate` itself uses for the base version, since
+        `APIVER_ROOT_PREFIX` is the one place that absolute string is
+        defined (ADR 0007 item 6).
         The generator is built with `patterns=` scoped to exactly this
         Version's own mounted patterns — not the whole project's urlconf —
         so sibling versions' routes can never leak in and drf-spectacular's

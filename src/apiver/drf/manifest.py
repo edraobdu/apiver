@@ -5,10 +5,13 @@ Two settings tell apiver which live objects to serialize — there is no
 registry to walk yet (that lands with `apiver migrate`/`apiver versions`,
 tickets 17-18), so a project points at its own objects explicitly:
 
-- `APIVER_VERSIONS`: `{version_name: "dotted.path.to.Version instance"}` for
-  every mounted Version.
+- `APIVER_VERSIONS`: a plain list of Live version names, e.g. `["v1",
+  "v2"]`. Each name's `Version` instance is derived as
+  `f"{APIVER_ROOT_DIR}.{name}.registry.{name}"` (ADR 0007 items 3-5) —
+  typed once, as a name, not twice as a path.
 - `APIVER_ALIASES`: `{alias_name: "dotted.path.to.Alias instance"}`,
-  optional, default `{}`.
+  optional, default `{}`. Unaffected by ADR 0007 — an alias has no fixed
+  home the way a version's package does.
 
 The manifest mirrors the in-memory resolution table one-to-one (ADR 0003
 item 6): per version, parent/frozen/deprecated/sunset plus
@@ -55,19 +58,28 @@ def _import_object(dotted_path: str) -> Any:
 
 
 def _load_versions() -> dict[str, Version]:
-    configured: dict[str, str] = getattr(settings, "APIVER_VERSIONS", {})
-    if not configured:
+    names: list[str] = getattr(settings, "APIVER_VERSIONS", [])
+    if not names:
         raise ManifestError(
             "APIVER_VERSIONS is empty or unset — apiver has no live Versions to write a "
-            "manifest for. Set APIVER_VERSIONS = {version_name: 'dotted.path.to.Version'} "
-            "in settings."
+            "manifest for. Set APIVER_VERSIONS = ['v1', 'v2', ...] in settings."
+        )
+
+    root_dir: str | None = getattr(settings, "APIVER_ROOT_DIR", None)
+    if not root_dir:
+        raise ManifestError(
+            "APIVER_ROOT_DIR is not set — apiver doesn't know where each version's package "
+            "lives. Set it to the dotted path of the aggregation root package (ADR 0007 item 3)."
         )
 
     versions: dict[str, Version] = {}
-    for name, dotted_path in configured.items():
+    for name in names:
+        dotted_path = f"{root_dir}.{name}.registry.{name}"
         obj = _import_object(dotted_path)
         if not isinstance(obj, Version):
-            raise ManifestError(f"APIVER_VERSIONS[{name!r}] = {dotted_path!r} is not a Version instance.")
+            raise ManifestError(
+                f"{dotted_path!r} (derived from APIVER_VERSIONS[{name!r}]) is not a Version instance."
+            )
         versions[name] = obj
     return versions
 
