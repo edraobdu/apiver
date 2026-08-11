@@ -22,7 +22,4 @@ urlpatterns = [
     path("api/integrations/webhooks/", include("webhooks.urls")),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
-    # apiver's Aggregation Root (ADR 0007 item 2) — adopted additively. Everything
-    # above is untouched, exactly where `apiver migrate` found it.
-    path("", include("api.urls")),
 ]
