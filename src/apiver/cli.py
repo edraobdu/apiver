@@ -12,12 +12,13 @@ import argparse
 import os
 import sys
 
+import django
+import tomli_w
+
+from .drf.manifest import ManifestError, manifest_diff
+
 
 def _cmd_manifest(*, check: bool, path: str | None) -> int:
-    import tomli_w
-
-    from .drf.manifest import ManifestError, manifest_diff
-
     try:
         resolved, current, committed = manifest_diff(path)
     except ManifestError as exc:
@@ -69,8 +70,6 @@ def main(argv: list[str] | None = None) -> int:
     if not os.environ.get("DJANGO_SETTINGS_MODULE"):
         print("apiver: DJANGO_SETTINGS_MODULE is not set.", file=sys.stderr)
         return 1
-
-    import django
 
     django.setup()
 

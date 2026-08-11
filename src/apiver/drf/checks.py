@@ -32,6 +32,8 @@ from pathlib import Path
 from django.conf import settings
 from django.core.checks import Error, Warning, register
 
+from .manifest import ManifestError, manifest_diff
+
 AUTHORED_REQUIRED_FILES = ("serializers.py", "views.py", "registry.py")
 BASE_REQUIRED_FILES = ("registry.py",)
 
@@ -119,8 +121,6 @@ def check_manifest_freshness(app_configs=None, **kwargs) -> list[Error | Warning
     """
     if not getattr(settings, "APIVER_VERSIONS", None):
         return []
-
-    from .manifest import ManifestError, manifest_diff
 
     try:
         resolved, current, committed = manifest_diff()
