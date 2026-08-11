@@ -561,6 +561,30 @@ def render_registry(plans: list[RegistrationPlan], *, base_name: str, var_name: 
     return "\n".join(lines)
 
 
+def _ensure_root_dir_exists(root_dir: str) -> None:
+    """Create `APIVER_ROOT_DIR`'s own package on disk if it isn't importable yet.
+
+    Unlike a version's own subpackage — which a developer authors by hand for
+    anything past the Base Version (ADR 0003 item 3) — the root package is
+    entirely apiver's own generated territory: nothing else ever has a reason to
+    create it first. Without this, the very first `migrate` or `mount` run in a
+    project that has never used apiver before fails on an unhelpful
+    `ModuleNotFoundError` for a package the developer was never told to create.
+    """
+    try:
+        import_module(root_dir)
+        return
+    except ImportError:
+        pass
+    current = Path.cwd()
+    for part in root_dir.split("."):
+        current = current / part
+        current.mkdir(exist_ok=True)
+        init_file = current / "__init__.py"
+        if not init_file.is_file():
+            init_file.write_text("")
+
+
 def _resolve_target_dir(module_path: str) -> Path:
     """The filesystem directory `module_path` (e.g. `"api.v1"`) names,
     without requiring the leaf package to exist yet — only its parent must
@@ -757,6 +781,7 @@ def write_registry(*, prefix: str | None) -> tuple[Path, Path]:
             "mounts under (ADR 0007 item 3)."
         )
     root_prefix = root_prefix.lstrip("/")
+    _ensure_root_dir_exists(root_dir)
 
     # `--prefix` — which pre-existing routes count as in scope for adoption
     # — is a distinct fact from APIVER_ROOT_PREFIX, but defaults to it: the

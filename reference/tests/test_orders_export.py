@@ -15,7 +15,7 @@ def client():
 def test_export_route_is_not_swallowed_by_the_orders_detail_pattern(client):
     Order.objects.create(reference="ORD-1", status="open")
 
-    response = client.get("/api/v1/orders/export/", HTTP_ACCEPT="text/csv")
+    response = client.get("/api/orders/export/", HTTP_ACCEPT="text/csv")
 
     assert response.status_code == 200
     assert response["Content-Type"].startswith("text/csv")
@@ -26,7 +26,7 @@ def test_export_renders_valid_csv_rows(client):
     Order.objects.create(reference="ORD-1", status="open")
     Order.objects.create(reference="ORD-2", status="shipped")
 
-    response = client.get("/api/v1/orders/export/", HTTP_ACCEPT="text/csv")
+    response = client.get("/api/orders/export/", HTTP_ACCEPT="text/csv")
 
     body = response.content.decode()
     lines = body.strip().split("\n")

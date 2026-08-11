@@ -126,6 +126,39 @@ def test_migrate_writes_registry_py_the_aggregation_root_and_the_manifest(tmp_pa
     assert before - after == set()
 
 
+def test_migrate_creates_the_root_package_when_it_does_not_exist_yet(tmp_path):
+    """The very first `migrate` run in a project that has never used apiver
+    before has no `APIVER_ROOT_DIR` package on disk at all — not even an empty
+    one. Nothing else, before this, ever had a reason to create it, so `migrate`
+    must (a developer should never be told to `mkdir`/`touch __init__.py`
+    themselves before running the one command that adopts their project)."""
+    manifest_target = tmp_path / "apiver.toml"
+    api_dir = FIXTURE_ROOT / "api"
+    shutil.rmtree(api_dir)
+    before = _snapshot(FIXTURE_ROOT)
+
+    try:
+        result = _run("--prefix", "api/", "--manifest-path", str(manifest_target))
+    finally:
+        # Restore the checked-in (empty) api/__init__.py the rest of this
+        # module's tests assume is already there, regardless of outcome.
+        api_dir.mkdir(exist_ok=True)
+        (api_dir / "__init__.py").touch(exist_ok=True)
+
+    assert result.returncode == 0, result.stderr
+    assert (GENERATED_ROOT / "registry.py").is_file()
+
+    after = _snapshot(FIXTURE_ROOT)
+    assert after - before == {
+        "api",
+        "api/__init__.py",
+        "api/v1",
+        "api/v1/__init__.py",
+        "api/v1/registry.py",
+        "api/urls.py",
+    }
+
+
 def test_migrate_infers_prefix_from_root_prefix_setting_when_unset(tmp_path):
     result = _run("--manifest-path", str(tmp_path / "apiver.toml"))
 
