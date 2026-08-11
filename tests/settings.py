@@ -9,6 +9,7 @@ INSTALLED_APPS = [
     "django.contrib.auth",
     "rest_framework",
     "drf_spectacular",
+    "apiver",
     "tests.testapp",
 ]
 
