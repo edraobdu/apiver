@@ -81,12 +81,16 @@ def test_migrate_writes_registry_py_the_aggregation_root_and_the_manifest(tmp_pa
     # ticket #40: the unscoped SpectacularAPIView is not registered raw —
     # it's rewired through schema_view(prefix=...), scoped to this
     # version's own absolute mount, so a sibling version can never leak in.
-    assert "v1.register('schema/', v1.schema_view(prefix='api/v1/'), name='schema')" in source
+    assert "v1.register('schema/', v1.schema_view(prefix='api/v1/'), name='v1-schema')" in source
     assert "SpectacularAPIView" not in source
-    # SpectacularSwaggerView needs no equivalent rewiring — it only
-    # reverse()s the schema route's url_name, so the ordinary path is
-    # already correct.
-    assert "v1.register('docs/', SpectacularSwaggerView, name='docs')" in source
+    # ticket 22: SpectacularSwaggerView is rewired too — its own registration
+    # name is qualified ("v1-docs", not the bare, pre-existing "docs") and its
+    # url_name is repointed at v1's own qualified schema name, so it can't
+    # collide with (or silently resolve to) a same-named route kept mounted
+    # elsewhere in the project.
+    assert (
+        "v1.register('docs/', SpectacularSwaggerView.as_view(url_name='v1-schema'), name='v1-docs')"
+    ) in source
     # The schema registration is emitted last: schema_view() snapshots
     # self.urls the moment it's called, so every other route must already
     # be registered for the generated schema to describe the whole surface.
