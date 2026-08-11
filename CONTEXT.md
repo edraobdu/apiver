@@ -73,6 +73,26 @@ _Avoid_: lookup, dispatch (which is DRF's term for method routing within a view)
 Building a Version's complete resolution table from its parent's table plus its own Delta.
 _Avoid_: merging, flattening (reserved for squash)
 
+**Aggregation Root**:
+The generated, hand-maintained module (`<root package>/urls.py`) that composes every Live Version's
+mount, one `include()` per Version, each already carrying its full absolute path. The project's actual
+root `urls.py` includes it once, at an empty prefix, and never changes again as Versions are added
+(ADR 0007).
+_Avoid_: root urls, api urls (ambiguous with the project's own true root `urls.py`)
+
+**Root Directory**:
+The dotted path to the package holding the Aggregation Root and every Version's own package
+(`APIVER_ROOT_DIR`, e.g. `"api"`) — a filesystem fact. Every Version's package is derived from it as
+`f"{ROOT_DIR}.{name}"`; nothing names a Version's directory independently (ADR 0007).
+_Avoid_: root (ambiguous between this and Root Prefix — the split this term exists to resolve)
+
+**Root Prefix**:
+The absolute URL path every Version mounts under (`APIVER_ROOT_PREFIX`, e.g. `"api/"`) — a routing fact,
+distinct from Root Directory. Combined with a Version's own name, it is what every Aggregation Root entry
+and every `schema_view(prefix=...)` call is built from (ADR 0007).
+_Avoid_: root, prefix alone (migrate's own `--prefix` flag names a related but not identical thing: which
+pre-existing routes count as in scope for adoption)
+
 **Serving Version**:
 The Version a request resolved into, carried on the request from the moment its mount is entered.
 Distinct from the Version a handler was *registered* in — one Registration is inherited by many
