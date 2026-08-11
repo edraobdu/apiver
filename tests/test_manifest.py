@@ -6,15 +6,17 @@ from django.test import override_settings
 
 from apiver.drf import ManifestError, build_manifest, check_manifest_freshness, check_max_live_versions
 from apiver.drf.manifest import load_committed_manifest, manifest_diff, manifest_path
-from tests.fixtures_manifest.registry import FIXED_SUNSET, stable, v1, v2
+from tests.fixtures_manifest.api.urls import stable
+from tests.fixtures_manifest.api.v1.registry import v1
+from tests.fixtures_manifest.api.v2.registry import FIXED_SUNSET, v2
+
+ROOT_DIR = "tests.fixtures_manifest.api"
 
 
 @override_settings(
-    APIVER_VERSIONS={
-        "v1": "tests.fixtures_manifest.registry.v1",
-        "v2": "tests.fixtures_manifest.registry.v2",
-    },
-    APIVER_ALIASES={"stable": "tests.fixtures_manifest.registry.stable"},
+    APIVER_ROOT_DIR=ROOT_DIR,
+    APIVER_VERSIONS=["v1", "v2"],
+    APIVER_ALIASES={"stable": "tests.fixtures_manifest.api.urls.stable"},
 )
 def test_build_manifest_mirrors_the_live_resolution_tables():
     manifest = build_manifest()
@@ -31,12 +33,7 @@ def test_build_manifest_mirrors_the_live_resolution_tables():
     assert manifest["aliases"] == {"stable": "v2"}
 
 
-@override_settings(
-    APIVER_VERSIONS={
-        "v1": "tests.fixtures_manifest.registry.v1",
-        "v2": "tests.fixtures_manifest.registry.v2",
-    },
-)
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["v1", "v2"])
 def test_build_manifest_records_action_and_source_version_per_route():
     manifest = build_manifest()
 
@@ -58,24 +55,26 @@ def test_build_manifest_records_action_and_source_version_per_route():
     assert v2_routes[inherited_ping_key]["source_version"] == "v1"
 
 
-@override_settings(APIVER_VERSIONS={})
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=[])
 def test_no_configured_versions_raises_a_manifest_error():
     with pytest.raises(ManifestError):
         build_manifest()
 
 
-@override_settings(
-    APIVER_VERSIONS={"v1": "tests.fixtures_manifest.registry.does_not_exist"},
-)
-def test_a_dotted_path_that_fails_to_import_raises_a_manifest_error():
+@override_settings(APIVER_VERSIONS=["v1", "v2"], APIVER_ROOT_DIR=None)
+def test_versions_configured_without_a_root_dir_raises_a_manifest_error():
     with pytest.raises(ManifestError):
         build_manifest()
 
 
-@override_settings(
-    APIVER_VERSIONS={"v1": "tests.fixtures_manifest.registry.FIXED_SUNSET"},
-)
-def test_a_dotted_path_pointing_at_a_non_version_raises_a_manifest_error():
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["does_not_exist"])
+def test_a_version_name_that_fails_to_import_raises_a_manifest_error():
+    with pytest.raises(ManifestError):
+        build_manifest()
+
+
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["notaversion"])
+def test_a_version_name_pointing_at_a_non_version_raises_a_manifest_error():
     with pytest.raises(ManifestError):
         build_manifest()
 
@@ -95,23 +94,16 @@ def test_load_committed_manifest_returns_none_when_the_file_is_missing(tmp_path)
     assert load_committed_manifest(tmp_path / "does-not-exist.toml") is None
 
 
-@override_settings(
-    APIVER_VERSIONS={
-        "v1": "tests.fixtures_manifest.registry.v1",
-        "v2": "tests.fixtures_manifest.registry.v2",
-    },
-)
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["v1", "v2"])
 def test_check_manifest_freshness_is_a_noop_without_apiver_versions_configured():
-    with override_settings(APIVER_VERSIONS={}):
+    with override_settings(APIVER_VERSIONS=[]):
         assert check_manifest_freshness() == []
 
 
 def test_check_manifest_freshness_warns_when_the_manifest_is_missing(tmp_path):
     with override_settings(
-        APIVER_VERSIONS={
-            "v1": "tests.fixtures_manifest.registry.v1",
-            "v2": "tests.fixtures_manifest.registry.v2",
-        },
+        APIVER_ROOT_DIR=ROOT_DIR,
+        APIVER_VERSIONS=["v1", "v2"],
         APIVER_MANIFEST_PATH=str(tmp_path / "apiver.toml"),
     ):
         messages = check_manifest_freshness()
@@ -124,10 +116,8 @@ def test_check_manifest_freshness_warns_when_the_manifest_is_missing(tmp_path):
 def test_check_manifest_freshness_is_silent_once_the_manifest_matches(tmp_path):
     manifest_file = tmp_path / "apiver.toml"
     with override_settings(
-        APIVER_VERSIONS={
-            "v1": "tests.fixtures_manifest.registry.v1",
-            "v2": "tests.fixtures_manifest.registry.v2",
-        },
+        APIVER_ROOT_DIR=ROOT_DIR,
+        APIVER_VERSIONS=["v1", "v2"],
         APIVER_MANIFEST_PATH=str(manifest_file),
     ):
         manifest_file.write_text(tomli_w.dumps(build_manifest()))
@@ -137,10 +127,8 @@ def test_check_manifest_freshness_is_silent_once_the_manifest_matches(tmp_path):
 def test_check_manifest_freshness_warns_once_the_manifest_drifts(tmp_path):
     manifest_file = tmp_path / "apiver.toml"
     with override_settings(
-        APIVER_VERSIONS={
-            "v1": "tests.fixtures_manifest.registry.v1",
-            "v2": "tests.fixtures_manifest.registry.v2",
-        },
+        APIVER_ROOT_DIR=ROOT_DIR,
+        APIVER_VERSIONS=["v1", "v2"],
         APIVER_MANIFEST_PATH=str(manifest_file),
     ):
         stale = build_manifest()
@@ -154,7 +142,8 @@ def test_check_manifest_freshness_warns_once_the_manifest_drifts(tmp_path):
 
 def test_check_manifest_freshness_reports_a_configuration_error_loudly(tmp_path):
     with override_settings(
-        APIVER_VERSIONS={"v1": "tests.fixtures_manifest.registry.does_not_exist"},
+        APIVER_ROOT_DIR=ROOT_DIR,
+        APIVER_VERSIONS=["does_not_exist"],
         APIVER_MANIFEST_PATH=str(tmp_path / "apiver.toml"),
     ):
         messages = check_manifest_freshness()
@@ -169,12 +158,7 @@ def test_the_freshness_check_is_registered_with_djangos_check_framework():
 
 
 def test_manifest_diff_reports_a_missing_committed_manifest(tmp_path):
-    with override_settings(
-        APIVER_VERSIONS={
-            "v1": "tests.fixtures_manifest.registry.v1",
-            "v2": "tests.fixtures_manifest.registry.v2",
-        },
-    ):
+    with override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["v1", "v2"]):
         _, current, committed = manifest_diff(tmp_path / "apiver.toml")
 
     assert committed is None
@@ -185,28 +169,17 @@ def test_alias_target_is_referenced_by_object_not_by_a_copy():
     assert stable.target is v2
 
 
-@override_settings(APIVER_VERSIONS={})
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=[])
 def test_check_max_live_versions_is_a_noop_without_apiver_versions_configured():
     assert check_max_live_versions() == []
 
 
-@override_settings(
-    APIVER_VERSIONS={
-        "v1": "tests.fixtures_manifest.registry.v1",
-        "v2": "tests.fixtures_manifest.registry.v2",
-    },
-)
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["v1", "v2"])
 def test_check_max_live_versions_is_silent_under_the_default_max():
     assert check_max_live_versions() == []
 
 
-@override_settings(
-    APIVER_VERSIONS={
-        "v1": "tests.fixtures_manifest.registry.v1",
-        "v2": "tests.fixtures_manifest.registry.v2",
-    },
-    APIVER_MAX_LIVE_VERSIONS=1,
-)
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["v1", "v2"], APIVER_MAX_LIVE_VERSIONS=1)
 def test_check_max_live_versions_warns_once_the_count_exceeds_the_configured_max():
     messages = check_max_live_versions()
 
@@ -218,20 +191,12 @@ def test_check_max_live_versions_warns_once_the_count_exceeds_the_configured_max
     assert "v2" in messages[0].msg
 
 
-@override_settings(
-    APIVER_VERSIONS={
-        "v1": "tests.fixtures_manifest.registry.v1",
-        "v2": "tests.fixtures_manifest.registry.v2",
-    },
-    APIVER_MAX_LIVE_VERSIONS=2,
-)
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["v1", "v2"], APIVER_MAX_LIVE_VERSIONS=2)
 def test_check_max_live_versions_is_silent_exactly_at_the_configured_max():
     assert check_max_live_versions() == []
 
 
-@override_settings(
-    APIVER_VERSIONS={"v1": "tests.fixtures_manifest.registry.does_not_exist"},
-)
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["does_not_exist"])
 def test_check_max_live_versions_reports_a_configuration_error_loudly():
     messages = check_max_live_versions()
 

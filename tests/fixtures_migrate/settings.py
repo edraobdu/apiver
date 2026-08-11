@@ -33,8 +33,10 @@ DATABASES = {
 ROOT_URLCONF = "tests.fixtures_migrate.urls"
 
 # The parent package (tests/fixtures_migrate/api/) is committed; the leaf
-# (api/v1/) is what `apiver migrate` writes, and tests clean it up after
-# themselves so the fixture tree stays pristine between runs.
+# (api/v1/, and api/urls.py) is what `apiver migrate` writes, and tests
+# clean it up after themselves so the fixture tree stays pristine between
+# runs.
 APIVER_BASE_VERSION = "v1"
-APIVER_VERSION_ROOTS = {"v1": "tests.fixtures_migrate.api.v1"}
-APIVER_VERSIONS = {"v1": "tests.fixtures_migrate.api.v1.registry.v1"}
+APIVER_ROOT_DIR = "tests.fixtures_migrate.api"
+APIVER_ROOT_PREFIX = "api/"
+APIVER_VERSIONS = ["v1"]

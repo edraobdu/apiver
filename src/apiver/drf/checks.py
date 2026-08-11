@@ -1,4 +1,5 @@
-"""The directory-shape system check (ticket 15, ADR 0003 items 1-3).
+"""The directory-shape system check (ticket 15, ADR 0003 items 1-3, ADR 0007
+items 3-5).
 
 Layout enforcement is split across two mechanisms on purpose (ADR 0003 item
 2): version-suffixed class names are checked at `register()`/`override()`
@@ -8,14 +9,15 @@ which file a `register()` call was made from short of walking the caller's
 stack frame — so it runs instead as an ordinary Django system check, which
 `manage.py check`/CI already run without apiver asking for anything special.
 
-A project names its version roots explicitly via two settings, since apiver
-has no other way to learn a version's intended directory without walking a
-live registry that doesn't exist until ticket 19:
+A project names its versions via two settings — `APIVER_ROOT_DIR` (the
+dotted path to the package holding every version) and `APIVER_VERSIONS` (a
+plain list of Live names) — and each version's directory is *derived* as
+`f"{APIVER_ROOT_DIR}.{name}"` rather than independently declared (ADR 0007
+item 4): a mis-named directory isn't flagged by this check, it's invisible,
+because nothing ever derives a path to it in the first place.
 
-- `APIVER_VERSION_ROOTS`: `{version_name: "dotted.module.path"}` for every
-  version that has a root package on disk.
-- `APIVER_BASE_VERSION`: the one entry in `APIVER_VERSION_ROOTS` (if any)
-  that names the Base Version. Its root is exempt from carrying
+- `APIVER_BASE_VERSION`: the one entry in `APIVER_VERSIONS` (if any) that
+  names the Base Version. Its root is exempt from carrying
   `serializers.py`/`views.py` (ADR 0003 item 3) — those stay wherever the
   pre-existing project already put them.
 
@@ -50,13 +52,25 @@ IGNORED_SUBDIRECTORIES = frozenset({"__pycache__"})
 
 @register()
 def check_version_layout(app_configs=None, **kwargs) -> list[Error]:
-    version_roots: dict[str, str] = getattr(settings, "APIVER_VERSION_ROOTS", {})
-    base_version = getattr(settings, "APIVER_BASE_VERSION", None)
+    version_names: list[str] = getattr(settings, "APIVER_VERSIONS", [])
+    if not version_names:
+        return []
 
+    root_dir: str | None = getattr(settings, "APIVER_ROOT_DIR", None)
+    if not root_dir:
+        return [
+            Error(
+                "APIVER_VERSIONS is set but APIVER_ROOT_DIR is not — apiver doesn't know where "
+                "each version's package lives (ADR 0007 item 3).",
+                id="apiver.E006",
+            )
+        ]
+
+    base_version = getattr(settings, "APIVER_BASE_VERSION", None)
     messages: list[Error] = []
-    for name, module_path in version_roots.items():
+    for name in version_names:
         is_base = name == base_version
-        messages.extend(_check_root(name, module_path, is_base=is_base))
+        messages.extend(_check_root(name, f"{root_dir}.{name}", is_base=is_base))
     return messages
 
 

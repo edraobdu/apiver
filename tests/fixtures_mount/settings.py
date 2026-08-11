@@ -18,7 +18,7 @@ REST_FRAMEWORK = {
 }
 
 SPECTACULAR_SETTINGS = {
-    "TITLE": "apiver manifest fixture",
+    "TITLE": "apiver mount fixture",
     "DESCRIPTION": "",
     "VERSION": "0.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
@@ -31,10 +31,8 @@ DATABASES = {
     }
 }
 
-ROOT_URLCONF = "tests.fixtures_manifest.api.urls"
+# No ROOT_URLCONF — `apiver mount` never boots the project's urlconf, only
+# reads/writes the aggregation root file directly.
 
-APIVER_ROOT_DIR = "tests.fixtures_manifest.api"
-APIVER_VERSIONS = ["v1", "v2"]
-APIVER_ALIASES = {
-    "stable": "tests.fixtures_manifest.api.urls.stable",
-}
+APIVER_ROOT_DIR = "tests.fixtures_mount.api"
+APIVER_ROOT_PREFIX = "api/"
