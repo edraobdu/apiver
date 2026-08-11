@@ -97,3 +97,16 @@ alongside the new setting, or is subsumed by it entirely) is left to that ticket
 version directory used to be merely flagged by `manage.py check`; it's now structurally unreachable,
 since `APIVER_VERSION_ROOTS`'s removal (item 4) means nothing ever derives a path to it in the first
 place.
+
+**Amendment (ticket #47): item 7's `mount` command generates a new version's `registry.py`, revising
+ADR 0003 item 4's "authored versions are hand-written" framing.** The follow-up build ticket found
+that hand-writing `derive()` plus the schema/docs wiring on every new version was pure boilerplate a
+developer had no reason to type themselves, and — worse — an easy place to forget the schema/docs
+override entirely, silently leaving a version serving its parent's schema/docs document under its own
+path (the same class of bug ADR 0001 item 4/ticket 22 already found and fixed for the Base Version).
+`apiver mount <version> --from <parent>` now generates `registry.py` from scratch — one shot, same
+"refuses to regenerate" posture as `migrate`'s Base Version file — with `<version> =
+<parent>.derive(<version>)` and both `schema/` and `docs/` always wired (`override()` or `register()`,
+whichever the parent's chain already resolves). Only the version's actual Delta — its own
+`register()`/`override()`/`remove()` calls for changed endpoints — stays a hand-edit to the file
+`mount` just created.

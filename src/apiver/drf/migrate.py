@@ -1,11 +1,13 @@
 """`apiver migrate`: walk the live URLconf and generate the base version's
 `registry.py`, mounting it into the Aggregation Root (ticket 17, ADR 0003
 items 3-4, 7; ticket 43, ADR 0007). `apiver mount` (`write_mount`) shares
-this module: it mounts every later, hand-authored version into that same
-Aggregation Root, appending rather than generating from scratch — and, if
-the version doesn't already have its own schema override, appends one to
-its `registry.py` too, wired from whatever ancestor's schema Registration
-it can inherit a key/name from (ticket #47).
+this module: it generates every later version's `registry.py` from
+scratch — `<version> = <from_version>.derive(<version>)`, with its own
+schema and docs routes always wired — then appends its `include()` to
+that same Aggregation Root (ticket #47). A developer never hand-writes a
+version into existence; `mount` is what creates it, and everything past
+that (its actual changed endpoints) is a hand-edit to the file `mount`
+just created.
 
 Generates wiring only — it never moves a file. The existing
 `serializers.py`/`views.py` stay wherever the pre-existing project already
@@ -48,7 +50,7 @@ from django.urls.resolvers import LocalePrefixPattern, RegexPattern
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 from rest_framework.routers import APIRootView
 
-from .version import Registration, Version
+from .version import Version
 
 _FORMAT_SUFFIX_RE = re.compile(r"\(\?P<format>|drf_format_suffix")
 _MAX_DEPTH = 64
@@ -775,101 +777,82 @@ def _write_or_extend_aggregation_root(version_name: str, *, root_dir: str, mount
     return aggregation_path
 
 
-def _own_schema_registration(version: Version) -> Registration | None:
-    """The Registration `version` itself made for its own schema route, if
-    any — `version.schema_route_name` is the single source of that naming
-    convention (`Version.schema_route_name`'s docstring, ticket 22
-    finding), so a Registration only counts if its `name` matches it
-    exactly, rather than merely occupying whatever key the route happens to
-    use."""
-    return next(
-        (
-            registration
-            for registration in version._registrations.values()
-            if registration.kind == "view" and registration.name == version.schema_route_name
-        ),
-        None,
-    )
-
-
-def _inherited_schema_registration(version: Version) -> Registration | None:
-    """Walk `version`'s ancestors, nearest first, for the first one that
-    wired its own schema route (ticket #47 item 3) — the key/name `apiver
-    mount` should reuse for `version`'s own override, rather than
-    inventing new ones. Returns None when no ancestor ever wired a schema
-    route at all, the no-parent-schema-registration case ticket #47 leaves
-    to be silently skipped, the same posture `discover()` already takes
-    when a migrated project's urlconf has no schema route to find."""
-    node = version.parent
-    while node is not None:
-        found = _own_schema_registration(node)
-        if found is not None:
-            return found
-        node = node.parent
-    return None
-
-
-def _write_schema_override(
-    version_name: str, version_obj: Version, *, registry_path: Path, mount_prefix: str
-) -> Path | None:
-    """Append `{version_name}.override(...)` wiring the target version's own
-    schema route into its `registry.py` (ticket #47) — every version needs
-    its *own* `schema_view(prefix=...)`; an unoverridden 'schema' key would
-    keep resolving through the parent's Registration unchanged, silently
-    serving the parent's schema document under the child's own path (ADR
-    0007 item 6).
-
-    Read from the live, already-imported `version_obj` rather than
-    regex-matching `registry.py`'s text (ADR 0002 item 5's "code is
-    authoritative" applies here too): a hand-written override that already
-    satisfies `version_obj.schema_route_name` makes this a no-op, the same
-    append-once posture `_write_or_extend_aggregation_root` already has for
-    the Aggregation Root. Returns None, writing nothing, in that case, or
-    when no ancestor ever wired a schema route to inherit the key from.
-
-    The override's `name=` is always `version_obj.schema_route_name`
-    (always `"schema"` for a version with a parent), *not* the inherited
-    Registration's own name — an authored version gets its own Django
-    instance namespace for free, so its schema route stays registered
-    under the plain, un-qualified `"schema"` every authored version uses,
-    never a name it copies from an ancestor (`Version.schema_route_name`'s
-    docstring).
+def _ensure_package(target_dir: Path) -> None:
+    """Create `target_dir` and its `__init__.py` if either is missing —
+    the same "make the directory this file is about to land in" step
+    `write_registry` already does for the base version, shared here so
+    `write_mount` doesn't duplicate it for an authored version's package.
     """
-    if _own_schema_registration(version_obj) is not None:
-        return None
-
-    inherited = _inherited_schema_registration(version_obj)
-    if inherited is None:
-        return None
-
-    source = registry_path.read_text()
-    if source and not source.endswith("\n"):
-        source += "\n"
-    line = (
-        f"{version_name}.override({inherited.key!r}, "
-        f"{version_name}.schema_view(prefix={mount_prefix!r}), name={version_obj.schema_route_name!r})\n"
-    )
-    registry_path.write_text(source + line)
-    return registry_path
+    target_dir.mkdir(parents=True, exist_ok=True)
+    init_file = target_dir / "__init__.py"
+    if not init_file.is_file():
+        init_file.write_text("")
 
 
-def write_mount(version_name: str) -> tuple[Path | None, Path]:
-    """`apiver mount`'s full flow: wire an authored version's own schema
-    route into its `registry.py` (ticket #47) if it doesn't have one
-    already, then append its `include()` to the Aggregation Root (ADR 0007
-    item 7). Never touches `settings.py` — adding `version_name` to
-    `APIVER_VERSIONS` stays a hand-edit, consistent with `migrate` only
-    ever reading settings.
+def render_mount_registry(
+    version_name: str, from_version: str, *, root_dir: str, mount_prefix: str, resolved_keys: set[str]
+) -> str:
+    """Render a freshly-authored version's whole `registry.py` (ticket
+    #47): derive it from `from_version`, then wire its own schema and docs
+    routes — every version needs both, unconditionally. An unoverridden
+    'schema'/'docs' key would keep resolving through the parent's
+    Registration unchanged, silently serving the parent's document under
+    the child's own path (ADR 0007 item 6); `register()` is used instead
+    of `override()` for whichever of the two isn't already resolvable
+    through `from_version`'s own chain (`resolved_keys`, its
+    `_resolved_keys()`) — a chain with no pre-existing docs route at all
+    still gets one wired here, for the developer to build on rather than
+    an API silently shipped without one.
 
-    Returns `(registry_path, aggregation_path)` — `registry_path` is None
-    when the schema override was skipped (ticket #47's idempotency and
-    no-ancestor-schema cases; see `_write_schema_override`).
+    This is the *entire* content `mount` ever generates. A developer never
+    hand-writes a version's `derive()` call or its schema/docs wiring —
+    `mount` is how a new version starts existing at all; everything past
+    this (the version's actual changed endpoints) is a hand-edit to the
+    file `mount` just created, the same one-shot-scaffold posture ADR 0003
+    item 4 already established for the base version's generated file.
+    """
+    schema_verb = "override" if "schema/" in resolved_keys else "register"
+    docs_verb = "override" if "docs/" in resolved_keys else "register"
+    lines = [
+        '"""Generated once by `apiver mount`; hand-editable afterwards, like',
+        "Django's own `startapp` boilerplate — it is not regenerated on later",
+        "runs (ADR 0003 item 4). Add this version's changed endpoints below",
+        "with register()/override()/remove().",
+        '"""',
+        "",
+        f"from {root_dir}.{from_version}.registry import {from_version}",
+        "",
+        f"{version_name} = {from_version}.derive({version_name!r})",
+        f"{version_name}.{schema_verb}('schema/', {version_name}.schema_view(prefix={mount_prefix!r}), "
+        "name='schema')",
+        f"{version_name}.{docs_verb}('docs/', {version_name}.docs_view(), name='docs')",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def write_mount(version_name: str, *, from_version: str) -> tuple[Path, Path]:
+    """`apiver mount`'s full flow (ticket #47): generate a freshly-authored
+    version's `registry.py` from scratch — deriving it from `from_version`
+    and wiring its own schema/docs routes — then append its `include()` to
+    the Aggregation Root (ADR 0007 item 7). `mount` is the only tool that
+    creates a version's `registry.py`, and it does so exactly once:
+    refuses if the file already exists, the same posture `migrate` already
+    has for the base version (ADR 0003 item 4) — nothing to regenerate
+    from once a developer has started adding their own endpoints to it.
+
+    Never touches `settings.py` — adding `version_name` to `APIVER_VERSIONS`
+    stays a hand-edit, consistent with `migrate` only ever reading settings.
+
+    Returns `(registry_path, aggregation_path)`.
     """
     if not version_name.isidentifier():
         raise MigrateError(
-            f"{version_name!r} is not a valid Python identifier — it must match the module-level "
-            "variable name in the version's own registry.py."
+            f"{version_name!r} is not a valid Python identifier — it becomes the module-level "
+            "variable name in the generated registry.py."
         )
+    if not from_version.isidentifier():
+        raise MigrateError(f"--from {from_version!r} is not a valid Python identifier.")
 
     root_dir = getattr(settings, "APIVER_ROOT_DIR", None)
     if not root_dir:
@@ -884,29 +867,52 @@ def write_mount(version_name: str) -> tuple[Path | None, Path]:
             "version mounts under (ADR 0007 item 3)."
         )
     root_prefix = root_prefix.lstrip("/")
+    _ensure_root_dir_exists(root_dir)
 
-    registry_dotted = f"{root_dir}.{version_name}.registry"
+    from_registry_dotted = f"{root_dir}.{from_version}.registry"
     try:
-        registry_module = import_module(registry_dotted)
+        from_registry_module = import_module(from_registry_dotted)
     except ImportError as exc:
         raise MigrateError(
-            f"{registry_dotted!r} could not be imported: {exc}. `apiver mount` expects the version's "
-            "registry.py to already exist — write it by hand first (ADR 0003 item 3), or run "
-            "`apiver migrate` first for the base version."
+            f"{from_registry_dotted!r} could not be imported: {exc}. `--from` must name a version "
+            "that has already been mounted, so its registry.py already exists."
         ) from exc
-    version_obj = getattr(registry_module, version_name, None)
-    if not isinstance(version_obj, Version):
-        raise MigrateError(f"{registry_dotted}.{version_name} is not a Version instance.")
+    from_version_obj = getattr(from_registry_module, from_version, None)
+    if not isinstance(from_version_obj, Version):
+        raise MigrateError(f"{from_registry_dotted}.{from_version} is not a Version instance.")
+
+    target_dir = _resolve_target_dir(f"{root_dir}.{version_name}")
+    registry_path = target_dir / "registry.py"
+    if registry_path.is_file():
+        raise MigrateError(
+            f"{registry_path} already exists — mount writes registry.py once and never regenerates "
+            "it (ADR 0003 item 4). Hand-edit it directly, or remove it first to regenerate from "
+            "scratch."
+        )
+    # Checked before anything is written, not just inside
+    # `_write_or_extend_aggregation_root` at the end — mount must write
+    # nothing at all when it can't finish, the same posture `write_registry`
+    # already takes (ticket 02 recommendation #5).
+    if _already_mounted(version_name, root_dir=root_dir):
+        aggregation_path = _resolve_target_dir(root_dir) / "urls.py"
+        raise MigrateError(f"{version_name!r} is already mounted in {aggregation_path}.")
 
     mount_prefix = root_prefix + f"{version_name}/"
-    schema_registry_path = _write_schema_override(
-        version_name, version_obj, registry_path=Path(registry_module.__file__), mount_prefix=mount_prefix
+    source = render_mount_registry(
+        version_name,
+        from_version,
+        root_dir=root_dir,
+        mount_prefix=mount_prefix,
+        resolved_keys=from_version_obj._resolved_keys(),
     )
+
+    _ensure_package(target_dir)
+    registry_path.write_text(source)
 
     aggregation_path = _write_or_extend_aggregation_root(
         version_name, root_dir=root_dir, mount_prefix=mount_prefix
     )
-    return schema_registry_path, aggregation_path
+    return registry_path, aggregation_path
 
 
 def write_registry(*, prefix: str | None) -> tuple[Path, Path]:
@@ -992,10 +998,7 @@ def write_registry(*, prefix: str | None) -> tuple[Path, Path]:
 
     source = render_registry(result.plans, base_name=base_name, var_name=base_name)
 
-    target_dir.mkdir(parents=True, exist_ok=True)
-    init_file = target_dir / "__init__.py"
-    if not init_file.is_file():
-        init_file.write_text("")
+    _ensure_package(target_dir)
     registry_path.write_text(source)
 
     aggregation_path = _write_or_extend_aggregation_root(
