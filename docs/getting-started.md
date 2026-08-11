@@ -63,9 +63,24 @@ APIVER_VERSIONS = ["v1"]  # plain list of Live version names — a hand-maintain
 `APIVER_ROOT_PREFIX` is a *URL* fact (what every version mounts under) — keep them named
 distinctly even when, as here, they resolve to the same string (`"api"` vs. `"api/"`).
 
-Nothing here is auto-detected. If the project's existing API doesn't live under
-`APIVER_ROOT_PREFIX` already, pass `apiver init --prefix <path>` in the next step to say
-explicitly which pre-existing routes count as in scope for adoption.
+`APIVER_ROOT_PREFIX` answers exactly one question: **where does apiver's own, versioned surface
+live from now on** — `v1`, `v2`, ... all mount under it (`api/v1/`, `api/v2/`, ...). It says
+nothing about where the project's *pre-existing* code happens to live today; that's a separate
+question, answered next, in step 3.
+
+Nothing here is auto-detected. `apiver init`'s job is to walk the pre-existing project and decide
+which of its routes are the API being adopted — and, left unconfigured, it assumes the simplest
+case: that the existing API already lives at `APIVER_ROOT_PREFIX` (the same place the new
+versioned surface is about to mount). If it doesn't — a project with no `/api/` segment at all,
+API routes mixed in at the root alongside `admin/` and auth urls, or anything else where "adopt
+everything under `APIVER_ROOT_PREFIX`" is the wrong scope — say so explicitly with `apiver init
+--prefix <path>` in the next step. `--prefix` only ever controls *which existing routes `init`
+is allowed to adopt*; it has no bearing on where the new versioned surface ends up mounting,
+that's `APIVER_ROOT_PREFIX`'s job alone, set once in this step and never touched again.
+`--prefix` is a single path today — a project whose pre-existing routes are scattered across
+several unrelated prefixes with no shared ancestor needs one `init` run against the largest tree,
+plus hand-written `register()` calls for the rest (see "If init refuses" below); multi-prefix
+support is tracked as [#61](https://github.com/edraobdu/apiver/issues/61).
 
 ## 3. Run `apiver init`
 
@@ -80,8 +95,9 @@ $ DJANGO_SETTINGS_MODULE=config.settings apiver init
 $ apiver --settings config.settings init
 ```
 
-This walks the *live, resolved* `ROOT_URLCONF` under `APIVER_ROOT_PREFIX` (or `--prefix`, if
-given), and — if every route it finds can be classified — writes two files:
+This walks the *live, resolved* `ROOT_URLCONF` under whichever scope step 2 settled — `--prefix`
+if you passed one, `APIVER_ROOT_PREFIX` otherwise — and, if every route it finds under that scope
+can be classified, writes two files:
 
 - `<APIVER_ROOT_DIR>/<APIVER_BASE_VERSION>/registry.py` — one `register()` call per discovered
   route, importing the *existing* serializers/views from wherever they already live. Nothing is
@@ -92,9 +108,9 @@ given), and — if every route it finds can be classified — writes two files:
   generated, is meant to be extended in place (by a later `apiver mount`), not regenerated.
 
 `init` is the first command every project runs, whether it's adopting a pre-existing API or starting
-one from scratch: if nothing under `APIVER_ROOT_PREFIX`/`--prefix` is found to adopt, `init` still
-succeeds, producing a route-less Base Version wired with nothing but its own `schema/`/`docs/`
-routes — the same unconditional guarantee `mount` already gives every later version.
+one from scratch: if nothing under that discovery scope is found to adopt, `init` still succeeds,
+producing a route-less Base Version wired with nothing but its own `schema/`/`docs/` routes — the
+same unconditional guarantee `mount` already gives every later version.
 
 Point the project's *actual* root `urls.py` at the Aggregation Root by appending one `include()` —
 adoption is additive, not a restructuring. Every route the project served before `init` ran keeps
