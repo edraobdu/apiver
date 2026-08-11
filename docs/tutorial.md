@@ -10,25 +10,11 @@ clean `reference/` checkout to reproduce the same flow yourself; nothing here do
 Run every command from `reference/` itself, using `uv run` (or an activated `.venv`) unless noted
 otherwise.
 
-## 0. Fix the Django-version mismatch
-
-`reference/pyproject.toml` pins `django~=6.1`. apiver's own supported range is `django~=5.2`
-(`getting-started.md`'s Prerequisites) — nothing in `apiver init`/`mount` catches this up front;
-it surfaces as a `uv` resolver failure the moment apiver is added as a dependency with an
-incompatible Django already pinned. Fix the pin first:
-
-```diff
- dependencies = [
--    "django~=6.1",
-+    "django~=5.2",
-     "djangorestframework~=3.18",
-     "drf-spectacular~=0.30",
- ]
-```
-
 ## 1. Install apiver
 
-Add it as an editable path dependency, alongside the version fix above:
+`reference/pyproject.toml` already pins `django~=5.2` to match apiver's own supported range (a
+`uv` resolver failure otherwise — apiver's Prerequisites in `getting-started.md`). Add apiver
+itself as an editable path dependency:
 
 ```diff
  dependencies = [
