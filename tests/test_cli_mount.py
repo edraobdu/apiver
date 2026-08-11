@@ -62,6 +62,7 @@ def test_mount_generates_a_new_versions_registry_py_from_scratch():
     assert result.returncode == 0, result.stderr
     assert f"wrote {V2_REGISTRY}" in result.stdout
     assert f"wrote {AGGREGATION_ROOT}" in result.stdout
+    assert "add 'v2' to APIVER_VERSIONS" in result.stdout
 
     source = V2_REGISTRY.read_text()
     assert "from tests.fixtures_mount.api.v1.registry import v1" in source
