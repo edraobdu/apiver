@@ -17,7 +17,7 @@ from django.test import override_settings
 
 from apiver.drf import Version
 from apiver.drf.squash import SquashError, _registrations_by_key, _render_registry, squash_version
-from tests.testapp.views import PaymentViewSet
+from tests.testapp.views import PaymentViewSet, pong
 
 ROOT_DIR = "tests.fixtures_squash.api"
 
@@ -156,6 +156,28 @@ def test_render_registry_preserves_a_frozen_target():
     )
 
     assert "frozentarget.freeze()" in source
+
+
+def test_render_registry_resolves_an_api_view_function_route():
+    """`pong` is `@api_view`-decorated: `registration.handler` is DRF's
+    `WrappedAPIView.as_view()` closure, not the function and not a `type`.
+    `_render_registry` must recognize it via `handler.cls` — the same way
+    `apiver init`/`mount` already do — instead of falling into the bare
+    function path, which only sees the closure's own unresolvable
+    `__qualname__` (ticket #87)."""
+    target = _derived_target("apiviewtarget")
+    target.register("pong", pong, name="pong")
+
+    source = _render_registry(
+        target,
+        _registrations_by_key(target),
+        mount_prefix="api/apiviewtarget/",
+        root_dir=ROOT_DIR,
+    )
+
+    assert "apiviewtarget.register('pong', pong, name='pong')" in source
+    assert "from tests.testapp.views import" in source
+    assert "pong" in source.split("from tests.testapp.views import", 1)[1].split("\n", 1)[0]
 
 
 def test_render_registry_preserves_a_deprecated_target():
