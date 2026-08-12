@@ -71,6 +71,8 @@ At the bottom of `config/settings.py`:
 APIVER_ROOT_DIR = "api"  # dotted path to the package holding every version
 APIVER_ROOT_PREFIX = "api/"  # absolute URL path every version mounts under
 APIVER_VERSIONS = ["v1"]  # hand-maintained list of Live version names
+# APIVER_VERSION_SCHEME = "sequential"  # or "semver"/"date"; this is the default, shown for
+# discoverability — --base (and later, apiver mount's version name) is validated against it.
 ```
 
 `reference/`'s whole pre-existing API already lives under `api/`, which is why no `--prefix`
