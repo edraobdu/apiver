@@ -74,6 +74,33 @@ def test_pagination_class_change_is_detected():
     assert change.after == "rest_framework.pagination.PageNumberPagination"
 
 
+def test_ordering_change_is_detected_as_plain_strings_not_class_refs():
+    class OrderedV1(viewsets.ViewSet):
+        ordering = ("id",)
+
+        def list(self, request):
+            return Response([])
+
+    class OrderedV2(viewsets.ViewSet):
+        ordering = ("-created",)
+
+        def list(self, request):
+            return Response([])
+
+    v1 = Version("v1")
+    v1.register("items", OrderedV1, basename="items")
+    v1.freeze()
+    v2 = v1.derive("v2")
+    v2.override("items", OrderedV2, basename="items")
+
+    changes = diff_view_attributes(v1, v2)
+
+    by_attribute = {c.attribute: c for c in changes}
+    change = by_attribute["ordering"]
+    assert change.before == ("id",)
+    assert change.after == ("-created",)
+
+
 def test_key_only_present_on_one_side_is_skipped():
     v1 = Version("v1")
     v1.register("payments", PaymentViewSet, basename="payments")
