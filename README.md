@@ -134,7 +134,7 @@ Start with an ordinary DRF resource — nothing apiver-specific about it yet. `p
 integer, the same way every other amount in the system is stored — cents, to avoid float rounding:
 
 ```python
-# products/serializers.py, products/views.py — your code, unchanged
+# your code, unchanged
 from rest_framework import serializers, viewsets
 
 
@@ -164,11 +164,9 @@ v1.register("products", ProductViewSet, basename="products")
 Now say V2 needs to stop making clients divide by 100 in their own code — `price_cents` (an int) becomes
 `price` (a decimal string). This is the change-shape that comes up constantly in real API versioning:
 not a new field, an existing one reshaped out from under the clients still calling V1. The override
-classes are ordinary additions to your existing `products` module — apiver doesn't ask you to put them
-anywhere new:
+classes are ordinary additions — apiver doesn't ask you to put them anywhere in particular:
 
 ```python
-# products/serializers.py — same file as ProductSerializer above, just grown by one class
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
@@ -189,7 +187,6 @@ class ProductSerializerV2(ProductSerializer):
 ```
 
 ```python
-# products/views.py — same file as ProductViewSet above, just grown by one class
 class ProductViewSetV2(ProductViewSet):
     serializer_class = ProductSerializerV2
 ```
