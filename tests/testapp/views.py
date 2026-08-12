@@ -70,6 +70,40 @@ class PaymentsSummaryView(APIView):
         return Response({"summary": "ok"})
 
 
+class Widget:
+    """A plain object, not a model — `HyperlinkedRelatedField.get_url` only
+    needs `.pk` (ADR 0005 items 5-8), so nothing heavier is required to
+    exercise it."""
+
+    def __init__(self, pk):
+        self.pk = pk
+
+
+class WidgetSerializer(serializers.Serializer):
+    """Registered once, on v1, and never touched again by v2 or v3 (ADR
+    0005's demonstration: inheritance composes behaviour, not just routes).
+    `url` is a plain `HyperlinkedIdentityField` — no apiver import, no
+    subclass — proving the zero-effort promise of the `get_url` patch."""
+
+    pk = serializers.CharField()
+    url = serializers.HyperlinkedIdentityField(view_name="widgets-detail")
+
+
+class WidgetViewSet(viewsets.ViewSet):
+    serializer_class = WidgetSerializer
+
+    def retrieve(self, request, pk=None):
+        data = WidgetSerializer(Widget(pk=pk), context={"request": request}).data
+        return Response(data)
+
+
+def healthz(request):
+    """A bare, unversioned route living outside every Version's mount — the
+    admin/login/health-check shape ADR 0005 item 10's reverse() fallback
+    exists for."""
+    return JsonResponse({"status": "ok"})
+
+
 @api_view(["GET"])
 def pong(request):
     return Response({"status": "pong"})

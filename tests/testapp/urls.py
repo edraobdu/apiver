@@ -15,6 +15,8 @@ from .views import (
     PlainPingView,
     RedactedInvoiceViewSetV2,
     RefundViewSetV2,
+    WidgetViewSet,
+    healthz,
     pong,
 )
 
@@ -25,6 +27,7 @@ v1.register("payments/summary/", PaymentsSummaryView, name="payments-summary")
 v1.register("pong/", pong, name="pong")
 v1.register("plain-ping/", PlainPingView, name="plain-ping")
 v1.register("invoices", InvoiceViewSet, basename="invoices")
+v1.register("widgets", WidgetViewSet, basename="widgets")
 
 # V2 never registers payments/ping/etc itself — it inherits v1's entire
 # resolution table live, and only adds what's new to it (ticket 08).
@@ -84,4 +87,8 @@ urlpatterns = [
     path("api/stable/schema/", stable.schema_view(), name="stable-schema"),
     path("api/deprecated-base/", include(deprecated_base.urls)),
     path("api/sunset-clock/", include(sunset_clock.urls)),
+    # Outside every Version's mount entirely — ADR 0005 item 10's fallback
+    # target: a name apiver.drf.reverse must still resolve while a versioned
+    # request is being served.
+    path("healthz/", healthz, name="healthz"),
 ]
