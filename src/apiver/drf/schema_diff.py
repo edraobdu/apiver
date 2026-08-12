@@ -279,14 +279,15 @@ def _diff_operation_fields(
     new_required = set((new_resolved or {}).get("required", []))
 
     changes: list[FieldChange] = []
-    for name in sorted(set(old_props) - set(new_props)):
+    old_field_keys, new_field_keys = set(old_props), set(new_props)
+    for name in sorted(old_field_keys - new_field_keys):
         changes.append(FieldChange(path=path, method=method, direction=direction, field=name, kind="removed"))
-    for name in sorted(set(new_props) - set(old_props)):
+    for name in sorted(new_field_keys - old_field_keys):
         after = _field_attrs(new_props[name], required=name in new_required)
         changes.append(
             FieldChange(path=path, method=method, direction=direction, field=name, kind="added", after=after)
         )
-    for name in sorted(set(old_props) & set(new_props)):
+    for name in sorted(old_field_keys & new_field_keys):
         before = _field_attrs(old_props[name], required=name in old_required)
         after = _field_attrs(new_props[name], required=name in new_required)
         if before != after:
@@ -315,12 +316,18 @@ def diff_schemas(old: dict[str, Any], new: dict[str, Any]) -> SchemaDiff:
     resources: list[ResourceChange] = []
     fields: list[FieldChange] = []
 
-    for path in sorted(set(old_paths) - set(new_paths)):
+    # Each key set built once and reused across its removed/added/shared
+    # comparisons below, rather than re-deriving `set(old_paths)`/
+    # `set(new_paths)` (and their per-path method equivalents) three times
+    # over — the same total path/method/component count is walked either
+    # way, just without redoing the set construction per comparison.
+    old_path_keys, new_path_keys = set(old_paths), set(new_paths)
+    for path in sorted(old_path_keys - new_path_keys):
         resources.append(ResourceChange(path=path, method=None, kind="removed"))
-    for path in sorted(set(new_paths) - set(old_paths)):
+    for path in sorted(new_path_keys - old_path_keys):
         resources.append(ResourceChange(path=path, method=None, kind="added"))
 
-    for path in sorted(set(old_paths) & set(new_paths)):
+    for path in sorted(old_path_keys & new_path_keys):
         old_methods = {m for m in old_paths[path] if m != "parameters"}
         new_methods = {m for m in new_paths[path] if m != "parameters"}
         for method in sorted(old_methods - new_methods):
@@ -343,9 +350,10 @@ def diff_schemas(old: dict[str, Any], new: dict[str, Any]) -> SchemaDiff:
                 )
 
     components: list[ComponentChange] = []
-    for name in sorted(set(old_components) - set(new_components)):
+    old_component_keys, new_component_keys = set(old_components), set(new_components)
+    for name in sorted(old_component_keys - new_component_keys):
         components.append(ComponentChange(component=name, kind="removed"))
-    for name in sorted(set(new_components) - set(old_components)):
+    for name in sorted(new_component_keys - old_component_keys):
         components.append(ComponentChange(component=name, kind="added"))
 
     return SchemaDiff(resources=resources, components=components, fields=fields)
