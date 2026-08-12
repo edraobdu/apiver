@@ -14,12 +14,16 @@ tickets 17-18), so a project points at its own objects explicitly:
   `f"{APIVER_ROOT_DIR}.urls.{name}"` (ADR 0007's second amendment) — an
   alias's conventional home is the Aggregation Root itself, mirroring how
   `APIVER_VERSIONS` derives its own path.
+- `APIVER_VERSION_SCHEME`: the project's Scheme name (ticket #66, ADR 0008
+  item 2), optional, default `"sequential"`. Declared once, top-level, not
+  per version — it names the Scheme every version's Display Name and
+  chronological order are derived from.
 
 The manifest mirrors the in-memory resolution table one-to-one (ADR 0003
-item 6): per version, parent/frozen/deprecated/sunset plus
-`{route_key: {action, source_version}}`; plus top-level alias pointers. The
-running server never reads this file — it exists only for tooling outside
-the process (ADR 0003 item 8).
+item 6): per version, parent/frozen/deprecated/sunset/display_name plus
+`{route_key: {action, source_version}}`; plus top-level `scheme` and alias
+pointers. The running server never reads this file — it exists only for
+tooling outside the process (ADR 0003 item 8).
 """
 
 from importlib import import_module
@@ -28,6 +32,7 @@ from typing import Any
 
 from django.conf import settings
 
+from ..schemes import DEFAULT_SCHEME_NAME, Scheme, UnknownSchemeError, get_scheme
 from ..versions_report import MANIFEST_FILENAME, load_committed_manifest
 from .version import Alias, Version
 
@@ -112,10 +117,33 @@ def _load_aliases() -> dict[str, Alias]:
     return aliases
 
 
-def _version_entry(version: Version) -> dict[str, Any]:
+def _configured_scheme() -> tuple[str, Scheme]:
+    """The project's `APIVER_VERSION_SCHEME` setting, and the Scheme object
+    it names (ticket #66, ADR 0008 item 2) — unset defaults to `sequential`,
+    today's behavior, unchanged. An unrecognized name is caught here rather
+    than left to surface later as a confusing formatting error, mirroring
+    how every other malformed-settings case in this module raises
+    ManifestError instead of propagating the underlying exception type."""
+    scheme_name = getattr(settings, "APIVER_VERSION_SCHEME", DEFAULT_SCHEME_NAME)
+    try:
+        return scheme_name, get_scheme(scheme_name)
+    except UnknownSchemeError as exc:
+        raise ManifestError(str(exc)) from exc
+
+
+def _version_entry(version: Version, scheme: Scheme) -> dict[str, Any]:
+    try:
+        display_name = scheme.format(version.name)
+    except ValueError as exc:
+        raise ManifestError(
+            f"version {version.name!r} does not conform to the configured "
+            f"APIVER_VERSION_SCHEME={scheme.name!r}: {exc}"
+        ) from exc
+
     entry: dict[str, Any] = {
         "frozen": version.frozen,
         "deprecated": version.deprecated,
+        "display_name": display_name,
     }
     if version.parent is not None:
         entry["parent"] = version.parent.name
@@ -135,11 +163,17 @@ def _version_entry(version: Version) -> dict[str, Any]:
 def build_manifest() -> dict[str, Any]:
     """Serialize every configured live Version and Alias into the manifest
     shape, one-to-one with the in-memory resolution table (ADR 0003 item 6).
+
+    `scheme` is recorded once, top-level (ADR 0008 item 2: declared per
+    project, not per Version) — `apiver versions` (`versions_report.py`)
+    reads it back to sort and format without needing Django settings itself.
     """
     versions = _load_versions()
     aliases = _load_aliases()
+    scheme_name, scheme = _configured_scheme()
     return {
-        "versions": {name: _version_entry(version) for name, version in versions.items()},
+        "scheme": scheme_name,
+        "versions": {name: _version_entry(version, scheme) for name, version in versions.items()},
         "aliases": {name: alias.target.name for name, alias in aliases.items()},
     }
 

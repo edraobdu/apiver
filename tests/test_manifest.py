@@ -40,6 +40,38 @@ def test_build_manifest_mirrors_the_live_resolution_tables():
 
 
 @override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["v1", "v2"])
+def test_build_manifest_defaults_to_the_sequential_scheme_when_unset():
+    manifest = build_manifest()
+
+    assert manifest["scheme"] == "sequential"
+    assert manifest["versions"]["v1"]["display_name"] == "v1"
+    assert manifest["versions"]["v2"]["display_name"] == "v2"
+
+
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["v1", "v2"], APIVER_VERSION_SCHEME="sequential")
+def test_build_manifest_records_the_explicitly_configured_scheme():
+    manifest = build_manifest()
+
+    assert manifest["scheme"] == "sequential"
+
+
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["v1", "v2"], APIVER_VERSION_SCHEME="semver")
+def test_build_manifest_raises_when_a_version_name_does_not_conform_to_the_configured_scheme():
+    # v1/v2 are sequential-shaped names — semver's base grammar (v1_2_3) does
+    # not match them (ticket #66, ADR 0008 Consequences: whether hand-authored
+    # non-conforming names are caught is left to this build ticket for the
+    # manifest-build path, since CLI-time validation isn't wired yet).
+    with pytest.raises(ManifestError):
+        build_manifest()
+
+
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["v1", "v2"], APIVER_VERSION_SCHEME="bogus")
+def test_build_manifest_raises_for_an_unrecognized_scheme_name():
+    with pytest.raises(ManifestError):
+        build_manifest()
+
+
+@override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["v1", "v2"])
 def test_build_manifest_records_action_and_source_version_per_route():
     manifest = build_manifest()
 
