@@ -18,15 +18,23 @@ human actually wants to see. Resolving each operation's request/response
 body through its `$ref` and diffing the resulting property sets sidesteps
 that entirely.
 
-What this cannot see, by construction — not a gap apiver is hiding, the
-same honesty the README already states — is exactly the support matrix's
-**No** rows: `SerializerMethodField` output, permissions/authentication,
-pagination/filtering/ordering/throttling, error response shape. `BLIND_SPOTS_NOTE`
-is the fixed disclaimer both `diff` and `check` print every invocation, so a
-clean report can never be mistaken for "nothing changed."
+Four of the support matrix's **No** rows turn out not to need the schema at
+all (ticket #79): `permission_classes`, `authentication_classes`,
+`pagination_class`, `filter_backends`, and `throttle_classes` are ordinary
+class attributes, resolved by plain Python attribute lookup — inheritance
+already does the MRO walk, so `getattr(handler, "permission_classes")`
+returns the effective value whether a version's handler declared it itself
+or inherited it untouched. `diff_view_attributes` compares that value
+between each version's registered handler for the same registration key,
+straight off the live `Version` objects, no schema involved. What's still
+out of reach, by construction — arbitrary Python inside `get_<field>`, a
+`get_permissions()`/`get_queryset()` override, exception-handler
+substitution, none of which is a static class attribute — stays disclaimed
+via `BLIND_SPOTS_NOTE`, so a clean report can never be mistaken for
+"nothing changed."
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from django.conf import settings
@@ -35,6 +43,8 @@ from ..schemes import Scheme
 from .version import Version
 
 __all__ = [
+    "ATTRIBUTE_DIFF_KEYS",
+    "AttributeChange",
     "BLIND_SPOTS_NOTE",
     "ComponentChange",
     "DiffError",
@@ -43,6 +53,7 @@ __all__ = [
     "SchemaDiff",
     "diff_schemas",
     "diff_versions",
+    "diff_view_attributes",
     "format_diff_text",
     "get_schema",
     "to_jsonable",
@@ -55,9 +66,26 @@ class DiffError(RuntimeError):
 
 BLIND_SPOTS_NOTE = (
     "apiver: a schema diff can't see everything — SerializerMethodField output changes, "
-    "permissions/authentication changes, pagination/filtering/ordering/throttling changes, and "
-    "error response shape changes are real, supported changes that don't appear in an OpenAPI "
-    "diff by construction (drf-spectacular doesn't introspect them). See README's support matrix."
+    "get_permissions()/get_queryset() overrides, default-ordering changes, and error response "
+    "shape changes are real, supported changes that don't appear in an OpenAPI diff by "
+    "construction (drf-spectacular doesn't introspect them). permission_classes, "
+    "authentication_classes, pagination_class, filter_backends, and throttle_classes are "
+    "diffed as class attributes (see 'attributes' below) when overridden the ordinary way — "
+    "but not when a view computes the equivalent behavior dynamically instead. See README's "
+    "support matrix."
+)
+
+# The class attributes `diff_view_attributes` compares — the ordinary DRF
+# override idiom for each of the support matrix's permissions/authentication
+# and pagination/filtering/throttling rows (ticket #79). Plain `getattr`
+# already resolves these through the handler's MRO, so no manual walk is
+# needed the way `check_no_removed_fields` needs one for `field = None`.
+ATTRIBUTE_DIFF_KEYS = (
+    "permission_classes",
+    "authentication_classes",
+    "pagination_class",
+    "filter_backends",
+    "throttle_classes",
 )
 
 # The JSON Schema keywords a field-level change actually cares about — type,
@@ -132,18 +160,42 @@ class ComponentChange:
 
 
 @dataclass(frozen=True)
+class AttributeChange:
+    """One registration's `permission_classes`/`authentication_classes`/
+    `pagination_class`/`filter_backends`/`throttle_classes` resolving to a
+    different value between two versions' handler for the same registration
+    key (ticket #79) — the whole registration's behavior, not one method,
+    since these attributes govern the handler as a whole rather than a
+    single (path, method) operation."""
+
+    resource: str  # the Registration key (router prefix, or literal path for a view)
+    attribute: str
+    before: tuple[str, ...] | str | None
+    after: tuple[str, ...] | str | None
+
+    @property
+    def breaking(self) -> bool:
+        """Conservative default, same posture as `FieldChange`: apiver
+        can't know whether a permission/pagination/throttle change loosens
+        or tightens behavior, so any change is flagged rather than silently
+        assumed safe."""
+        return True
+
+
+@dataclass(frozen=True)
 class SchemaDiff:
     resources: list[ResourceChange] = field(default_factory=list)
     components: list[ComponentChange] = field(default_factory=list)
     fields: list[FieldChange] = field(default_factory=list)
+    attributes: list[AttributeChange] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
-        return not (self.resources or self.components or self.fields)
+        return not (self.resources or self.components or self.fields or self.attributes)
 
     @property
-    def breaking_changes(self) -> list[ResourceChange | FieldChange]:
-        return [change for change in (*self.resources, *self.fields) if change.breaking]
+    def breaking_changes(self) -> list[ResourceChange | FieldChange | AttributeChange]:
+        return [change for change in (*self.resources, *self.fields, *self.attributes) if change.breaking]
 
 
 def _schema_prefix(version: Version, *, scheme: Scheme) -> str:
@@ -207,16 +259,76 @@ def _strip_version_prefix(schema: dict[str, Any], prefix: str) -> dict[str, Any]
     return {**schema, "paths": normalized}
 
 
+def _class_ref(obj: Any) -> str:
+    return f"{obj.__module__}.{obj.__qualname__}"
+
+
+def _normalize_attribute_value(value: Any) -> tuple[str, ...] | str | None:
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        return tuple(_class_ref(item) for item in value)
+    return _class_ref(value)
+
+
+def _registrations_by_key(version: Version) -> dict[str, Any]:
+    return {
+        route.registration.key: route.registration
+        for route in version.resolution_table.values()
+        if route.registration is not None
+    }
+
+
+def diff_view_attributes(old: Version, new: Version) -> list[AttributeChange]:
+    """Compare `ATTRIBUTE_DIFF_KEYS` between `old` and `new`'s handler for
+    every registration key present on both sides (ticket #79).
+
+    A registration a version never touched is inherited as the identical
+    Python object (ADR 0002 item 2), so `old_handler is new_handler` short-
+    circuits the whole comparison for the common case — most routes in a
+    delta chain — without walking any attributes at all. Only class-based
+    handlers are inspected; a function-based view (a bare `@api_view` or a
+    plain Django `View`) has no class attributes to diff, so it's skipped
+    the same way it's skipped by `Version._check_no_removed_fields`.
+    """
+    old_registrations = _registrations_by_key(old)
+    new_registrations = _registrations_by_key(new)
+
+    changes: list[AttributeChange] = []
+    for key in sorted(set(old_registrations) & set(new_registrations)):
+        old_handler = old_registrations[key].handler
+        new_handler = new_registrations[key].handler
+        if old_handler is new_handler:
+            continue
+        if not (isinstance(old_handler, type) and isinstance(new_handler, type)):
+            continue
+
+        for attribute in ATTRIBUTE_DIFF_KEYS:
+            before = _normalize_attribute_value(getattr(old_handler, attribute, None))
+            after = _normalize_attribute_value(getattr(new_handler, attribute, None))
+            if before != after:
+                changes.append(AttributeChange(resource=key, attribute=attribute, before=before, after=after))
+    return changes
+
+
 def diff_versions(old: Version, new: Version, *, scheme: Scheme) -> SchemaDiff:
     """Build both versions' composed schemas and diff them, prefix-stripped
     so routes line up across versions regardless of which version segment
     each one is actually mounted under — the convenience entry point `diff`/
-    `check` use instead of composing `get_schema`/`diff_schemas` by hand."""
+    `check` use instead of composing `get_schema`/`diff_schemas` by hand.
+
+    Attribute changes (`diff_view_attributes`) are folded in here rather
+    than into `diff_schemas` itself, since they're read straight off the
+    live `Version`/handler objects, not the composed OpenAPI documents
+    `diff_schemas` operates on — `diff_schemas` stays schema-only and
+    testable against hand-built document fragments with no Django app in
+    reach."""
     old_prefix = _schema_prefix(old, scheme=scheme)
     new_prefix = _schema_prefix(new, scheme=scheme)
     old_schema = _strip_version_prefix(get_schema(old, scheme=scheme), old_prefix)
     new_schema = _strip_version_prefix(get_schema(new, scheme=scheme), new_prefix)
-    return diff_schemas(old_schema, new_schema)
+    diff = diff_schemas(old_schema, new_schema)
+    return replace(diff, attributes=diff_view_attributes(old, new))
 
 
 def _resolve_body(schema: dict[str, Any] | None, components: dict[str, Any]) -> dict[str, Any] | None:
@@ -379,6 +491,16 @@ def to_jsonable(diff: SchemaDiff) -> dict[str, Any]:
             }
             for c in diff.fields
         ],
+        "attributes": [
+            {
+                "resource": c.resource,
+                "attribute": c.attribute,
+                "before": c.before,
+                "after": c.after,
+                "breaking": c.breaking,
+            }
+            for c in diff.attributes
+        ],
         "blind_spots": BLIND_SPOTS_NOTE,
     }
 
@@ -406,6 +528,11 @@ def format_diff_text(diff: SchemaDiff, *, old_name: str, new_name: str) -> str:
     for change in diff.components:
         marker = "-" if change.kind == "removed" else "+"
         lines.append(f"{marker} component {change.component!r}")
+
+    for change in diff.attributes:
+        lines.append(
+            f"~ {change.attribute} changed on {change.resource!r}: {change.before} -> {change.after}"
+        )
 
     breaking_count = len(diff.breaking_changes)
     if breaking_count:

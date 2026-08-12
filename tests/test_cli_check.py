@@ -38,6 +38,13 @@ def test_check_always_prints_the_blind_spots_disclaimer():
     assert "SerializerMethodField" in result.stdout
 
 
+def test_check_reports_a_permission_classes_change():
+    result = _run("check")
+
+    assert result.returncode == 0, result.stderr
+    assert "permission_classes changed on 'payments'" in result.stdout
+
+
 def test_check_exits_zero_even_though_breaking_changes_are_present():
     result = _run("check")
 
