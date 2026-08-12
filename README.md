@@ -28,6 +28,7 @@ complete, working API surface without duplicating the 95% of it that didn't chan
 - [What's supported today](#whats-supported-today)
 - [The routing/schema boundary](#the-routingschema-boundary)
 - [Lifecycle: deprecation and sunset](#lifecycle-deprecation-and-sunset)
+- [Version schemes](#version-schemes)
 - [CLI at a glance](#cli-at-a-glance)
 - [Settings](#settings)
 - [Requirements](#requirements)
@@ -340,6 +341,33 @@ $ apiver alias stable --from v2
 Re-pointing `stable` at a future `v3` is a one-line `target=` edit in the generated Aggregation Root;
 callers of `/api/stable/...` never have to change anything.
 
+## Version schemes
+
+Version names default to plain sequential slugs — `v1`, `v2`, … — and that stays every existing
+project's behavior with zero changes. A project can opt into `semver`- or date-shaped names instead via
+one project-wide setting:
+
+```python
+APIVER_VERSION_SCHEME = "semver"  # or "date"; unset defaults to "sequential"
+```
+
+| Scheme | Slug (what you type) | Display Name (what shows up in URLs) |
+| --- | --- | --- |
+| `sequential` (default) | `v1`, `v2` | same as the slug |
+| `semver` | `v1_2_3` | `v1.2.3` |
+| `date` | `d2026_08_11` | `2026-08-11` |
+
+`apiver mount`, `apiver init`, and `apiver alias --from` validate every version name against the
+configured scheme before writing anything, failing loud on a non-conforming name rather than silently
+accepting a typo. The Display Name surfaces in the generated Aggregation Root and
+`schema_view(prefix=...)` URL text (e.g. `/api/v1.2.3/`) — the module dotted path, the Django instance
+namespace, and the version-suffix class-name check all keep the raw slug unchanged, since a Python
+identifier can't contain dots. An optional `_label` suffix (`v1_2_3_testing`) gives a branch or testing
+name a legal shape without making it a chronological point. `apiver alias`'s own name is exempt from
+scheme validation — it's a human label (`stable`, `latest`), not a version point — but its `--from`
+target is still validated as a real, scheme-conforming version. See
+[ADR 0008](docs/adr/0008-version-schemes.md) for the full design.
+
 ## CLI at a glance
 
 `apiver` is a standalone command, not a `manage.py` subcommand, so it can introspect a project offline.
@@ -364,6 +392,7 @@ reads only the committed `apiver.toml` and needs neither.
 | `APIVER_BASE_VERSION` | The name `apiver init` adopts the existing API as. |
 | `APIVER_VERSIONS` | Hand-maintained list of live version names. |
 | `APIVER_ALIASES` | Hand-maintained list of declared alias names. |
+| `APIVER_VERSION_SCHEME` | The project's version-naming Scheme — `sequential` (default), `semver`, or `date` — used to validate, format, and chronologically order version names ([ADR 0008](docs/adr/0008-version-schemes.md)). |
 | `APIVER_MAX_LIVE_VERSIONS` | Warning-level system check threshold for live versions (default **3**) — a maintenance-burden signal, not a hard limit; pair with `manage.py check --fail-level WARNING` in CI if you want it hard. |
 | `APIVER_MANIFEST_PATH` | Where `apiver.toml` is read/written, if not the project root. |
 | `APIVER_OUT_OF_BAND_ALIAS` | Alias namespace `apiver.reverse` falls back to for code with no request in reach (a Celery task, a management command). |
@@ -405,14 +434,7 @@ its scattered pre-existing code reorganized into apiver's layout, once generate-
 proven the wiring correct in the field.
 
 **Near-term, alongside those:** multiple `--prefix` values for `apiver init` against projects whose
-routes are scattered across several unrelated roots, and CLI-time validation for the two additional
-version-naming schemes already designed (see below).
-
-**Version schemes beyond sequential (`v1`, `v2`, …).** The design for `semver`-style (`v1.2.3`) and
-`date`-style (`2026-08-11`) version names is accepted and documented
-([ADR 0008](docs/adr/0008-version-schemes.md)), but not implemented yet — today, every version name is a
-plain sequential slug. A project-wide `APIVER_VERSION_SCHEME` setting will validate, format, and
-chronologically order names once this lands.
+routes are scattered across several unrelated roots.
 
 **1.0 — `apiver squash`.** Long delta chains are the natural worry with a deltas-forward design — by
 `v12`, is the inheritance chain still maintainable? `squash` is the intended answer: flattening an

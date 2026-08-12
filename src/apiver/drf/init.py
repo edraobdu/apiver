@@ -62,6 +62,7 @@ from django.urls.resolvers import LocalePrefixPattern, RegexPattern
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 from rest_framework.routers import APIRootView
 
+from ..schemes import DEFAULT_SCHEME_NAME, Scheme, UnknownSchemeError, get_scheme
 from .version import Version
 
 _FORMAT_SUFFIX_RE = re.compile(r"\(\?P<format>|drf_format_suffix")
@@ -73,6 +74,35 @@ class InitError(RuntimeError):
     regenerated. Raised with every offending route listed at once —
     init fails closed and writes nothing rather than emit a registry
     that silently drops routes (ticket 02 recommendation #5)."""
+
+
+def _configured_scheme() -> Scheme:
+    """The project's `APIVER_VERSION_SCHEME`-named Scheme (ticket #67, ADR
+    0008 item 5) — unset defaults to `sequential`, mirroring
+    `manifest._configured_scheme`'s settings-resolution shape but raising
+    this module's own `InitError` instead of `ManifestError`."""
+    scheme_name = getattr(settings, "APIVER_VERSION_SCHEME", DEFAULT_SCHEME_NAME)
+    try:
+        return get_scheme(scheme_name)
+    except UnknownSchemeError as exc:
+        raise InitError(str(exc)) from exc
+
+
+def _validate_scheme_conformance(name: str, *, scheme: Scheme, arg_prefix: str = "") -> str:
+    """`name`, formatted into its Display Name by `scheme` — also the
+    strict, CLI-time validation ADR 0008 item 5 requires: `Scheme.format()`
+    raises `ValueError` for a non-conforming slug, translated here into the
+    existing `InitError` pattern before any scaffold file is written.
+    `arg_prefix` mirrors the `--from `-prefixed identifier-check messages
+    this module already raises for the same argument.
+    """
+    try:
+        return scheme.format(name)
+    except ValueError as exc:
+        raise InitError(
+            f"{arg_prefix}{name!r} does not conform to the configured "
+            f"APIVER_VERSION_SCHEME={scheme.name!r}: {exc}"
+        ) from exc
 
 
 @dataclass(frozen=True)
@@ -917,6 +947,9 @@ def write_mount(version_name: str, *, from_version: str) -> tuple[Path, Path]:
     if not from_version.isidentifier():
         raise InitError(f"--from {from_version!r} is not a valid Python identifier.")
 
+    scheme = _configured_scheme()
+    display_name = _validate_scheme_conformance(version_name, scheme=scheme)
+
     root_dir = getattr(settings, "APIVER_ROOT_DIR", None)
     if not root_dir:
         raise InitError(
@@ -943,6 +976,7 @@ def write_mount(version_name: str, *, from_version: str) -> tuple[Path, Path]:
     from_version_obj = getattr(from_registry_module, from_version, None)
     if not isinstance(from_version_obj, Version):
         raise InitError(f"{from_registry_dotted}.{from_version} is not a Version instance.")
+    _validate_scheme_conformance(from_version, scheme=scheme, arg_prefix="--from ")
 
     target_dir = _resolve_target_dir(f"{root_dir}.{version_name}")
     registry_path = target_dir / "registry.py"
@@ -960,7 +994,7 @@ def write_mount(version_name: str, *, from_version: str) -> tuple[Path, Path]:
         aggregation_path = _resolve_target_dir(root_dir) / "urls.py"
         raise InitError(f"{version_name!r} is already mounted in {aggregation_path}.")
 
-    mount_prefix = root_prefix + f"{version_name}/"
+    mount_prefix = root_prefix + f"{display_name}/"
     source = render_mount_registry(
         version_name,
         from_version,
@@ -1000,6 +1034,9 @@ def write_init(*, prefix: str | None) -> tuple[Path, Path]:
             f"APIVER_BASE_VERSION={base_name!r} is not a valid Python identifier — it becomes the "
             "module-level variable name in the generated registry.py."
         )
+
+    scheme = _configured_scheme()
+    display_name = _validate_scheme_conformance(base_name, scheme=scheme)
 
     root_dir = getattr(settings, "APIVER_ROOT_DIR", None)
     if not root_dir:
@@ -1045,7 +1082,7 @@ def write_init(*, prefix: str | None) -> tuple[Path, Path]:
         aggregation_path = _resolve_target_dir(root_dir) / "urls.py"
         raise InitError(f"{base_name!r} is already mounted in {aggregation_path}.")
 
-    mount_prefix = root_prefix + f"{base_name}/"
+    mount_prefix = root_prefix + f"{display_name}/"
     root_urlconf = import_module(settings.ROOT_URLCONF)
     result = discover(
         root_urlconf.urlpatterns, prefix=prefix, schema_mount_prefix=mount_prefix, base_name=base_name
@@ -1199,6 +1236,14 @@ def write_alias(name: str, *, from_version: str) -> Path:
     if _already_mounted(name, root_dir=root_dir):
         aggregation_path = _resolve_target_dir(root_dir) / "urls.py"
         raise InitError(f"{name!r} is already mounted in {aggregation_path}.")
+
+    # `name` itself stays exempt from scheme validation — a human label
+    # (`stable`, `latest`), not a version point (ADR 0008 item 5). Only
+    # `--from` names a real version, checked here rather than earlier so
+    # every existing-import/already-mounted diagnostic above still fires
+    # first for a scheme-nonconforming `--from` that also fails one of
+    # those.
+    _validate_scheme_conformance(from_version, scheme=_configured_scheme(), arg_prefix="--from ")
 
     alias_prefix = root_prefix + f"{name}/"
     return _extend_aggregation_root_with_alias(

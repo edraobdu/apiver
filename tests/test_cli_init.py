@@ -295,6 +295,92 @@ def test_init_requires_apiver_root_dir(tmp_path):
     assert not GENERATED_ROOT.exists()
 
 
+def test_init_refuses_a_scheme_nonconforming_base_version(tmp_path):
+    """ticket #67, ADR 0008 item 5: under the default `sequential` scheme,
+    'va' is a valid Python identifier but not a valid slug (its base isn't
+    all digits) — init must refuse it before writing anything."""
+    (tmp_path / "settings_bad_scheme.py").write_text(
+        "from tests.fixtures_init.settings import *  # noqa: F403\nAPIVER_BASE_VERSION = 'va'\n"
+    )
+    env = dict(os.environ)
+    env["DJANGO_SETTINGS_MODULE"] = "settings_bad_scheme"
+    env["PYTHONPATH"] = os.pathsep.join([str(REPO_ROOT / "src"), str(REPO_ROOT), str(tmp_path)])
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "apiver.cli",
+            "init",
+            "--prefix",
+            "api/",
+            "--manifest-path",
+            str(tmp_path / "apiver.toml"),
+        ],
+        cwd=str(REPO_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "does not conform" in result.stderr
+    assert "APIVER_VERSION_SCHEME='sequential'" in result.stderr
+    assert not (FIXTURE_ROOT / "api" / "va").exists()
+    assert not GENERATED_AGGREGATION_ROOT.exists()
+
+
+def test_init_uses_display_name_in_generated_urls_under_semver_scheme(tmp_path):
+    """ADR 0008 item 7: the Aggregation Root's include() line and
+    schema_view(prefix=...) use the Scheme's Display Name ('v1.0.0'), while
+    the module dotted path and the module-level variable name keep the raw
+    slug ('v1_0_0')."""
+    generated_root = FIXTURE_ROOT / "api" / "v1_0_0"
+    try:
+        result = _run(
+            "--prefix",
+            "api/",
+            "--manifest-path",
+            str(tmp_path / "apiver.toml"),
+            settings="tests.fixtures_init.settings_semver",
+        )
+
+        assert result.returncode == 0, result.stderr
+        source = (generated_root / "registry.py").read_text()
+        assert "v1_0_0 = Version('v1_0_0')" in source
+        assert "v1_0_0.schema_view(prefix='api/v1.0.0/')" in source
+
+        aggregation_source = GENERATED_AGGREGATION_ROOT.read_text()
+        assert "from tests.fixtures_init.api.v1_0_0.registry import v1_0_0" in aggregation_source
+        assert "    path('api/v1.0.0/', include(v1_0_0.urls))," in aggregation_source
+    finally:
+        shutil.rmtree(generated_root, ignore_errors=True)
+        GENERATED_AGGREGATION_ROOT.unlink(missing_ok=True)
+
+
+def test_init_uses_display_name_in_generated_urls_under_date_scheme(tmp_path):
+    generated_root = FIXTURE_ROOT / "api" / "d2026_08_11"
+    try:
+        result = _run(
+            "--prefix",
+            "api/",
+            "--manifest-path",
+            str(tmp_path / "apiver.toml"),
+            settings="tests.fixtures_init.settings_date",
+        )
+
+        assert result.returncode == 0, result.stderr
+        source = (generated_root / "registry.py").read_text()
+        assert "d2026_08_11 = Version('d2026_08_11')" in source
+        assert "d2026_08_11.schema_view(prefix='api/2026-08-11/')" in source
+
+        aggregation_source = GENERATED_AGGREGATION_ROOT.read_text()
+        assert "    path('api/2026-08-11/', include(d2026_08_11.urls))," in aggregation_source
+    finally:
+        shutil.rmtree(generated_root, ignore_errors=True)
+        GENERATED_AGGREGATION_ROOT.unlink(missing_ok=True)
+
+
 def test_unknown_init_invocation_is_rejected():
     result = _run("--not-a-real-flag")
     assert result.returncode != 0
