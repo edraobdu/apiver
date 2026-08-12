@@ -6,6 +6,7 @@ from .checks import (
 )
 from .init import InitError
 from .manifest import ManifestError, build_manifest
+from .reverse import reverse
 from .version import Alias, CompositionError, Registration, Route, RouteIdentity, Version
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "check_manifest_freshness",
     "check_max_live_versions",
     "check_version_layout",
+    "reverse",
 ]

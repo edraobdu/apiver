@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from functools import wraps
@@ -13,6 +14,12 @@ from rest_framework.routers import BaseRouter, SimpleRouter
 from rest_framework.viewsets import ViewSetMixin
 
 from .fields import check_no_removed_fields
+
+#: The Version serving the current request, for code with no request in
+#: reach — a bare `reverse()`, a model's `get_absolute_url()` (ADR 0005 item
+#: 2). A ContextVar rather than a threadlocal so it stays correct under
+#: async. Set and reset around each call by `Version._wrap`.
+current_version: ContextVar["Version | None"] = ContextVar("apiver_current_version", default=None)
 
 
 class CompositionError(RuntimeError):
@@ -344,12 +351,22 @@ class Version:
         self._sunset_at = sunset
         return self
 
-    def _gate(self, callback: Any) -> Any:
-        """Wrap a callback with this Version's deprecation/sunset gating.
+    def _wrap(self, callback: Any) -> Any:
+        """Wrap a callback so it carries this Version at request time — the
+        one mount-time seam ADR 0005 item 1 shares with ticket 13's
+        deprecation/sunset gating.
 
         Closes directly over `self` rather than reverse-engineering which
         Version served a request from `request.resolver_match` — the latter
-        breaks specifically for the unnamespaced base Version (ticket 13).
+        breaks specifically for the unnamespaced base Version (ticket 13),
+        and cannot answer *which Version object* is serving at all (ADR 0005
+        item 4). Applied unconditionally, to every route of every Version —
+        not only deprecated ones — because stamping at register()/override()
+        time is rejected (ADR 0005 item 3): a Registration made in V1 is
+        inherited by V2 as the same Python object, so a class- or
+        module-level stamp would have only one slot for every version
+        serving it.
+
         `@wraps` copies the original callback's `__dict__`, which is where
         DRF's `.as_view()` stashes `cls`/`actions`/`initkwargs` — without
         that, drf-spectacular's schema generation (which walks this same
@@ -357,16 +374,22 @@ class Version:
         """
 
         @wraps(callback)
-        def gated(request, *args, **kwargs):
-            if self._sunset_at is not None and timezone.now() >= self._sunset_at:
-                return JsonResponse({"detail": "This API version has been sunset."}, status=410)
-            response = callback(request, *args, **kwargs)
-            response["Deprecation"] = "true"
-            if self._sunset_at is not None:
-                response["Sunset"] = http_date(self._sunset_at.timestamp())
-            return response
+        def wrapped(request, *args, **kwargs):
+            request.apiver_version = self
+            token = current_version.set(self)
+            try:
+                if self._sunset_at is not None and timezone.now() >= self._sunset_at:
+                    return JsonResponse({"detail": "This API version has been sunset."}, status=410)
+                response = callback(request, *args, **kwargs)
+                if self._deprecated:
+                    response["Deprecation"] = "true"
+                    if self._sunset_at is not None:
+                        response["Sunset"] = http_date(self._sunset_at.timestamp())
+                return response
+            finally:
+                current_version.reset(token)
 
-        return gated
+        return wrapped
 
     def _build_own(self) -> tuple[list, dict[str, Route]]:
         if self._own_build_cache is not None:
@@ -456,6 +479,15 @@ class Version:
         return table
 
     @property
+    def namespace(self) -> str | None:
+        """The Django instance namespace links generated during a request
+        served by this Version should use — `None` for the unnamespaced Base
+        Version (ADR 0001 item 4), this Version's own name otherwise. The
+        one place that mapping is defined, read by `apiver.drf.reverse` and
+        the patched `HyperlinkedRelatedField.get_url` (ADR 0005 item 4)."""
+        return self.name if self.parent is not None else None
+
+    @property
     def urls(self):
         # Base version (no parent): bare URL names, no app_name (ADR 0001
         # item 4). A derived Version is mounted under a Django instance
@@ -463,17 +495,16 @@ class Version:
         # explicit namespace= to make `reverse("v2:...")` work (ADR 0002
         # item 7).
         patterns, _ = self._build()
-        if self._deprecated:
-            # A fresh list of patterns wrapping this Version's own callbacks,
-            # not a mutation of `_build()`'s cache: the same route inherited
-            # by a non-deprecated child (or reused unchanged by the parent's
-            # own resolution table) must not pick up this Version's gating.
-            patterns = [
-                URLPattern(pattern.pattern, self._gate(pattern.callback), pattern.default_args, pattern.name)
-                for pattern in patterns
-            ]
-        app_name = self.name if self.parent is not None else None
-        return patterns, app_name
+        # A fresh list of patterns wrapping this Version's own callbacks, not
+        # a mutation of `_build()`'s cache: the same route inherited by a
+        # descendant Version (or reused unchanged by the parent's own
+        # resolution table) must carry *that* Version's stamp, not this
+        # one's (ADR 0005 item 3).
+        patterns = [
+            URLPattern(pattern.pattern, self._wrap(pattern.callback), pattern.default_args, pattern.name)
+            for pattern in patterns
+        ]
+        return patterns, self.namespace
 
     @property
     def schema_route_name(self) -> str:

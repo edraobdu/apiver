@@ -15,3 +15,6 @@ class ApiverConfig(AppConfig):
 
     def ready(self) -> None:
         from .drf import checks  # noqa: F401
+        from .drf.hyperlinks import patch_hyperlinked_related_field
+
+        patch_hyperlinked_related_field()
