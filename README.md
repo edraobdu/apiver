@@ -339,8 +339,8 @@ not just the easy ones:
 | Remove an `@action` | Set the action attribute to `None` on the subclass | Yes |
 | Change permissions, authentication | Override the ordinary DRF class attribute | Yes, as a class-attribute diff — **No** if computed dynamically (`get_permissions()`) instead |
 | Change pagination, filtering, throttling | Override the ordinary DRF class attribute | Yes, as a class-attribute diff — **No** if computed dynamically instead |
-| Change default ordering | Override `get_queryset()` or a filter backend's ordering config | **No** |
-| Change the error response shape | Override exception handling | **No** |
+| Change default ordering | Override the `ordering` class attribute | Yes, as a class-attribute diff — **No** if computed dynamically (`get_queryset()`) instead |
+| Change the error response shape | Override exception handling | **No** — `get_exception_handler()` is a method override, not a class attribute; there's nothing static to diff |
 
 The field-removal story has one sharp edge worth calling out explicitly: **`field = None` does not
 remove a field.** It's the idiom every Django-forms developer reaches for, and DRF silently ignores it —
@@ -364,11 +364,13 @@ gap apiver is hiding; it's a property of drf-spectacular's own introspection, an
 paper over it with guesswork.
 
 The same honesty extends to the remaining **No** rows in the table above — `SerializerMethodField`
-output, default ordering, error response shape. They're real, supported changes; a schema diff can't see
-them by construction, not a gap apiver is hiding. `permission_classes`, `authentication_classes`,
-`pagination_class`, `filter_backends`, and `throttle_classes` turned out not to need the schema at all
-([#79](https://github.com/edraobdu/apiver/issues/79)): they're ordinary class attributes, so `apiver
-diff`/`apiver check` compare them directly off each version's registered handler — reported as
+output and error response shape. They're real, supported changes; a schema diff can't see them by
+construction, not a gap apiver is hiding, and neither is even in principle a static class attribute apiver
+could diff instead: the first is arbitrary Python inside `get_<field>`, the second is a
+`get_exception_handler()` method override. `permission_classes`, `authentication_classes`,
+`pagination_class`, `filter_backends`, `throttle_classes`, and `ordering` turned out not to need the
+schema at all ([#79](https://github.com/edraobdu/apiver/issues/79)): they're ordinary class attributes, so
+`apiver diff`/`apiver check` compare them directly off each version's registered handler — reported as
 `attributes` alongside the schema-derived `fields`/`resources`. This only catches the ordinary
 class-attribute override idiom; a view that computes the equivalent behavior dynamically
 (`get_permissions()`, `get_queryset()`) is still invisible, the same way the remaining **No** rows are.
@@ -484,7 +486,7 @@ then `DJANGO_SETTINGS_MODULE`, then `[tool.apiver].django_settings_module` in `p
 | `apiver alias NAME --from VERSION` | Declares a movable name pointing at an already-mounted version. |
 | `apiver manifest [--check]` | Writes `apiver.toml`, a committed snapshot of every version's resolution table; `--check` exits non-zero if it's stale, the same idiom as `makemigrations --check`. |
 | `apiver versions` | Prints lineage, frozen status, lifecycle state, alias pointers, and defined-vs-inherited routes per version — reading only the manifest, without booting the project. |
-| `apiver diff OLD NEW [--json]` | Compares two versions' composed OpenAPI schemas, plus each shared registration's `permission_classes`/`authentication_classes`/`pagination_class`/`filter_backends`/`throttle_classes`, and reports every field/resource/attribute change between them — human-readable by default, `--json` for tooling. Always prints the schema-diff blind-spots disclaimer alongside the result. |
+| `apiver diff OLD NEW [--json]` | Compares two versions' composed OpenAPI schemas, plus each shared registration's `permission_classes`/`authentication_classes`/`pagination_class`/`filter_backends`/`throttle_classes`/`ordering`, and reports every field/resource/attribute change between them — human-readable by default, `--json` for tooling. Always prints the schema-diff blind-spots disclaimer alongside the result. |
 | `apiver check [VERSION ...]` | CI-facing wrapper around `diff`: prints every authored live version's diff against its parent (or just the versions named). Every reported change already came from an explicit `register()`/`override()`/`remove()` call, so `check` reports rather than gates — it exits non-zero only on a tool/config error, never because a diff found changes. |
 
 ## Settings

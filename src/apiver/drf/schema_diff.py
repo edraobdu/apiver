@@ -65,27 +65,32 @@ class DiffError(RuntimeError):
 
 
 BLIND_SPOTS_NOTE = (
-    "apiver: a schema diff can't see everything — SerializerMethodField output changes, "
-    "get_permissions()/get_queryset() overrides, default-ordering changes, and error response "
-    "shape changes are real, supported changes that don't appear in an OpenAPI diff by "
-    "construction (drf-spectacular doesn't introspect them). permission_classes, "
-    "authentication_classes, pagination_class, filter_backends, and throttle_classes are "
-    "diffed as class attributes (see 'attributes' below) when overridden the ordinary way — "
-    "but not when a view computes the equivalent behavior dynamically instead. See README's "
-    "support matrix."
+    "apiver: a schema diff can't see everything — SerializerMethodField output changes and "
+    "error response shape changes are real, supported changes that don't appear in an OpenAPI "
+    "diff by construction (drf-spectacular doesn't introspect them, and neither is a static "
+    "class attribute apiver can diff). permission_classes, authentication_classes, "
+    "pagination_class, filter_backends, throttle_classes, and ordering are diffed as class "
+    "attributes (see 'attributes' below) when overridden the ordinary way — but not when a view "
+    "computes the equivalent behavior dynamically instead (get_permissions(), get_queryset()). "
+    "See README's support matrix."
 )
 
 # The class attributes `diff_view_attributes` compares — the ordinary DRF
-# override idiom for each of the support matrix's permissions/authentication
-# and pagination/filtering/throttling rows (ticket #79). Plain `getattr`
-# already resolves these through the handler's MRO, so no manual walk is
-# needed the way `check_no_removed_fields` needs one for `field = None`.
+# override idiom for each of the support matrix's permissions/authentication,
+# pagination/filtering/throttling, and default-ordering rows (ticket #79).
+# `ordering` is what `rest_framework.filters.OrderingFilter.get_default_ordering`
+# reads off the view — a plain class attribute like the rest, unlike
+# SerializerMethodField output or error response shape (see BLIND_SPOTS_NOTE),
+# neither of which is an attribute at all. Plain `getattr` already resolves
+# these through the handler's MRO, so no manual walk is needed the way
+# `check_no_removed_fields` needs one for `field = None`.
 ATTRIBUTE_DIFF_KEYS = (
     "permission_classes",
     "authentication_classes",
     "pagination_class",
     "filter_backends",
     "throttle_classes",
+    "ordering",
 )
 
 # The JSON Schema keywords a field-level change actually cares about — type,
@@ -260,10 +265,16 @@ def _strip_version_prefix(schema: dict[str, Any], prefix: str) -> dict[str, Any]
 
 
 def _class_ref(obj: Any) -> str:
-    return f"{obj.__module__}.{obj.__qualname__}"
+    return f"{obj.__module__}.{obj.__qualname__}" if isinstance(obj, type) else str(obj)
 
 
 def _normalize_attribute_value(value: Any) -> tuple[str, ...] | str | None:
+    """`permission_classes`/`authentication_classes`/`pagination_class`/
+    `filter_backends`/`throttle_classes` hold classes; `ordering` holds
+    plain field-name strings (e.g. `("-created",)`) — `_class_ref` renders
+    a class as its qualified name and passes a string through unchanged, so
+    both attribute shapes normalize to something JSON-serializable and
+    comparable across versions."""
     if value is None:
         return None
     if isinstance(value, (list, tuple)):
