@@ -27,7 +27,9 @@ and is discovered rather than relocated.
 _Avoid_: root version, v1 (which is a name, not a role)
 
 **Authored Version**:
-Any version with a parent, written by the developer as a delta and required to live in apiver's layout.
+Any version with a parent, written by the developer as a delta. Its code, like the Base Version's, may
+live anywhere in the project and is discovered rather than relocated — having a parent, not layout, is
+what distinguishes it from the Base Version.
 _Avoid_: child version, derived version
 
 **Alias**:
@@ -76,6 +78,13 @@ _Avoid_: endpoint, URL
 The metadata carried alongside a Route — `basename`, `action`, `detail`, `url_name`, `methods` — read
 from the URLconf rather than inferred. Distinct from the Route's key, which is always the path.
 _Avoid_: operation id (that is an OpenAPI artifact derived from the path)
+
+**Registry**:
+The one file every Version's root must contain (`registry.py`) — where that Version's
+`register()`/`override()`/`remove()` calls happen. The only layout apiver enforces; everything else a
+Version needs (serializers, views, ...) is imported into it from wherever the project already keeps
+that code, never required to live alongside it.
+_Avoid_: manifest (reserved for `apiver.toml`, a separate generated artifact)
 
 **Registration**:
 One declaration binding a handler into a Version — a ViewSet at a prefix, or a single view at a path. A
