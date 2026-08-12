@@ -274,7 +274,12 @@ def test_init_requires_apiver_base_version(tmp_path):
     assert not GENERATED_ROOT.exists()
 
 
-def test_init_requires_apiver_root_dir(tmp_path):
+def test_init_defaults_the_root_dir_when_apiver_root_dir_is_unset(tmp_path):
+    """APIVER_ROOT_DIR unset now falls back to "apiversions" (ADR 0003's
+    ticket #77 amendment) instead of refusing — run with cwd=tmp_path so the
+    freshly-created "apiversions/" package lands there, never in the real
+    repo (init would otherwise create it relative to its cwd, ADR 0003
+    ticket #77's `_ensure_root_dir_exists` warning notwithstanding)."""
     (tmp_path / "settings_no_root_dir.py").write_text(
         "from tests.fixtures_init.settings import *  # noqa: F403\nAPIVER_ROOT_DIR = None\n"
     )
@@ -283,15 +288,24 @@ def test_init_requires_apiver_root_dir(tmp_path):
     env["PYTHONPATH"] = os.pathsep.join([str(REPO_ROOT / "src"), str(REPO_ROOT), str(tmp_path)])
 
     result = subprocess.run(
-        [sys.executable, "-m", "apiver.cli", "init", "--manifest-path", str(tmp_path / "apiver.toml")],
-        cwd=str(REPO_ROOT),
+        [
+            sys.executable,
+            "-m",
+            "apiver.cli",
+            "init",
+            "--prefix",
+            "api/",
+            "--manifest-path",
+            str(tmp_path / "apiver.toml"),
+        ],
+        cwd=str(tmp_path),
         env=env,
         capture_output=True,
         text=True,
     )
 
-    assert result.returncode != 0
-    assert "APIVER_ROOT_DIR" in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "apiversions" / "v1" / "registry.py").is_file()
     assert not GENERATED_ROOT.exists()
 
 

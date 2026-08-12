@@ -26,12 +26,43 @@ def test_a_version_root_missing_registry_reports_an_error():
     assert "'missing_registry'" in messages[0].msg
 
 
-def test_a_version_root_with_a_subpackage_produces_no_messages():
+def test_a_version_root_with_a_subpackage_reports_an_error():
+    """ADR 0003's ticket #77 amendment: a version's root may hold nothing
+    besides registry.py — not even a subpackage, which this fixture still
+    carries from before that amendment (serializers.py/views.py/payments/)."""
     with override_settings(
         APIVER_ROOT_DIR="tests.fixtures_layout",
         APIVER_VERSIONS=["subpackaged"],
     ):
-        assert check_version_layout() == []
+        messages = check_version_layout()
+
+    assert len(messages) == 1
+    assert messages[0].id == "apiver.E010"
+    assert "'subpackaged'" in messages[0].msg
+
+
+def test_extra_entries_are_listed_by_name():
+    with override_settings(
+        APIVER_ROOT_DIR="tests.fixtures_layout",
+        APIVER_VERSIONS=["subpackaged"],
+    ):
+        messages = check_version_layout()
+
+    assert "payments" in messages[0].msg
+    assert "serializers.py" in messages[0].msg
+    assert "views.py" in messages[0].msg
+
+
+def test_a_registry_with_an_inline_class_definition_reports_an_error():
+    with override_settings(
+        APIVER_ROOT_DIR="tests.fixtures_layout",
+        APIVER_VERSIONS=["inline_definitions"],
+    ):
+        messages = check_version_layout()
+
+    assert len(messages) == 1
+    assert messages[0].id == "apiver.E011"
+    assert "InlineWidgetView" in messages[0].msg
 
 
 def test_the_base_version_root_only_needs_registry_py():
@@ -80,12 +111,16 @@ def test_no_versions_configured_produces_no_messages():
         assert check_version_layout() == []
 
 
-def test_versions_configured_without_a_root_dir_reports_an_error():
+def test_versions_configured_without_a_root_dir_resolves_the_default_root_dir():
+    # APIVER_ROOT_DIR unset falls back to "apiversions" (ADR 0003's ticket #77
+    # amendment) rather than erroring — "apiversions.valid_base" doesn't exist
+    # in this test project, so it still reports an error, but apiver.E001
+    # (import failure), never the removed "root dir unset" apiver.E006.
     with override_settings(APIVER_ROOT_DIR=None, APIVER_VERSIONS=["valid_base"]):
         messages = check_version_layout()
 
     assert len(messages) == 1
-    assert messages[0].id == "apiver.E006"
+    assert messages[0].id == "apiver.E001"
 
 
 def test_all_messages_are_errors():

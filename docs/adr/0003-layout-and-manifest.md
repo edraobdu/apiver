@@ -128,3 +128,43 @@ have, so it becomes the de facto index of a version's whole registration surface
 `register()`/`override()`/`remove()` call in one file, everything else imported. Not mechanically
 enforced (nothing stops a developer from defining a class inline there), but it's the convention the
 README now models throughout.
+
+**Amendment (ticket #77): the ticket #73 amendment's "not mechanically enforced" is reversed — a
+version's root may now contain *only* `registry.py` (plus `__init__.py`), and `registry.py` itself may
+contain only imports, its `Version(...)`/`.derive()` line, and `register()`/`override()`/`remove()`
+calls. A class or function defined inline there, or any other file dropped into the version's root, is
+now an `apiver check` **Error**, not a silent option.**
+
+Surfaced while scoping squash (ticket #77, ADR 0009): squash's whole mechanism — deleting an absorbed
+version's directory once its routes are folded into the survivor — is only safe if nothing a *surviving*
+version still needs can possibly live inside the directory being deleted. Under the ticket #73 amendment,
+it could: the README's own inline-override pattern put a class directly in `registry.py`, and nothing
+stopped a class in one version's `registry.py` from being imported (or subclassed) by a later version's.
+Squash has no way to know, short of parsing every version's source for cross-version references, whether
+deleting `v1/` would silently break `v2/`. Rather than build that detection, the ticket #73 amendment's
+premise — "nothing stops a developer from defining a class inline there" — is the thing that no longer
+holds: forbidding it outright removes the ambiguity squash would otherwise have to reason about, and
+removes it at the one moment that actually matters (before a version is ever authored), not after.
+
+This still keeps item 3's core finding: apiver enforces *where routing is declared*, never *where the
+rest of a project's code lives*. Serializers, views, and everything else stay wherever the project already
+organizes them, discovered by `registry.py`'s imports — that part of the ticket #73 amendment is
+unchanged. What's reversed is narrower: `registry.py` itself, and the version's root directory around it,
+are now apiver's exclusively, the same way the Aggregation Root already is.
+
+This is also why `APIVER_ROOT_DIR` gets a real default, `"apiversions"`, instead of requiring explicit
+configuration as before: the overwhelmingly common convention for a hand-rolled Django REST project is to
+call its app `api/`, with serializers/views/etc. living directly inside it. A hard "nothing but
+`registry.py` lives here" rule collides head-on with that convention if apiver's own root directory is
+*also* conventionally named `api/` — a developer adopting apiver would either have to rename their
+existing app (exactly the "moving a file" cost ADR 0003 item 3 already promised against) or fight the new
+restriction. `apiversions` is deliberately not a name any pre-existing Django app is likely to already
+have. `apiver init` still warns (non-fatal — the same advisory posture as the manifest-staleness and
+max-live-versions checks) if the resolved root directory already exists on disk before `init` would
+create it fresh, since that's the one moment a pre-existing, unrelated directory of the same name would
+otherwise collide silently. A project that wants a different name still sets `APIVER_ROOT_DIR` explicitly
+— this is a default, not a new required-fixed value.
+
+Consequence for the README: its quickstart already keeps `ProductSerializerV2`/`ProductViewSetV2` outside
+`registry.py` (imported from `products.views`, not inlined), so the walkthrough itself doesn't change —
+only the settings snippet's `APIVER_ROOT_DIR` value and an explicit callout of the new hard rule.

@@ -156,7 +156,14 @@ def test_mount_refuses_to_mount_the_same_version_twice():
     assert AGGREGATION_ROOT.read_text() == written
 
 
-def test_mount_requires_apiver_root_dir(tmp_path):
+def test_mount_defaults_the_root_dir_when_apiver_root_dir_is_unset(tmp_path):
+    """APIVER_ROOT_DIR unset now falls back to "apiversions" (ADR 0003's
+    ticket #77 amendment) instead of refusing outright — but this fixture
+    project's v1 lives under "tests.fixtures_mount.api", not "apiversions",
+    so --from v1 still fails to import, just for a different reason. Run
+    with cwd=tmp_path: `_ensure_root_dir_exists` creates the (now-defaulted)
+    "apiversions" package on disk before the --from import is even attempted,
+    and that must never land in the real repo."""
     (tmp_path / "settings_no_root_dir.py").write_text(
         "from tests.fixtures_mount.settings import *  # noqa: F403\nAPIVER_ROOT_DIR = None\n"
     )
@@ -166,14 +173,14 @@ def test_mount_requires_apiver_root_dir(tmp_path):
 
     result = subprocess.run(
         [sys.executable, "-m", "apiver.cli", "mount", "v2", "--from", "v1"],
-        cwd=str(REPO_ROOT),
+        cwd=str(tmp_path),
         env=env,
         capture_output=True,
         text=True,
     )
 
     assert result.returncode != 0
-    assert "APIVER_ROOT_DIR" in result.stderr
+    assert "apiversions.v1.registry" in result.stderr
     assert not AGGREGATION_ROOT.exists()
 
 

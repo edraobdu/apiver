@@ -23,8 +23,18 @@ implementation code, stay wherever the project already put them (ADR 0003
 item 3): apiver enforces where routing is declared, never where the rest of
 the code lives, so this check has no need to know which configured version
 is the base.
+
+**ADR 0003's ticket #77 amendment** hardens that boundary from a convention
+into two more checks here: a version's root may contain *only* `registry.py`
+(plus `__init__.py`/`__pycache__`) — nothing else, not even a subpackage —
+and `registry.py` itself may contain only imports, its
+`Version(...)`/`.derive()` line, and `register()`/`override()`/`remove()`
+calls, never an inline `class`/`def`. Both are Errors, not Warnings: squash
+(ADR 0009) depends on this being true to guarantee that flattening a
+version's routes never silently drops code a surviving version still needs.
 """
 
+import ast
 from importlib import import_module
 from pathlib import Path
 
@@ -32,9 +42,12 @@ from django.conf import settings
 from django.core.checks import Error, Warning, register
 
 from ..schemes import DEFAULT_SCHEME_NAME, SCHEME_NAMES
-from .manifest import ManifestError, _load_aliases, _load_versions, manifest_diff
+from .manifest import ManifestError, _load_aliases, _load_versions, manifest_diff, resolve_root_dir
 
 REQUIRED_FILES = ("registry.py",)
+
+# ADR 0003's ticket #77 amendment: nothing else may live in a version's root.
+ALLOWED_ROOT_ENTRIES = frozenset({"registry.py", "__init__.py", "__pycache__"})
 
 # ADR 0004 item 8: the endless-chain worry central to why deltas-forward was
 # chosen over the inverse architecture needs an actual mechanism, not a
@@ -48,16 +61,7 @@ def check_version_layout(app_configs=None, **kwargs) -> list[Error]:
     if not version_names:
         return []
 
-    root_dir: str | None = getattr(settings, "APIVER_ROOT_DIR", None)
-    if not root_dir:
-        return [
-            Error(
-                "apiver needs APIVER_ROOT_DIR set to derive each version's package path from "
-                "APIVER_VERSIONS's names — without it, this check has nothing to check "
-                "(ADR 0007 item 3).",
-                id="apiver.E006",
-            )
-        ]
+    root_dir = resolve_root_dir()
 
     messages: list[Error] = []
     for name in version_names:
@@ -87,13 +91,75 @@ def _check_root(name: str, module_path: str) -> list[Error]:
         ]
     root_dir = Path(next(iter(root_dir)))
 
-    return [
+    messages = [
         Error(
             f"version {name!r}'s root {module_path!r} is missing {filename!r}",
             id="apiver.E002",
         )
         for filename in REQUIRED_FILES
         if not (root_dir / filename).is_file()
+    ]
+    messages.extend(_check_no_extra_entries(name, module_path, root_dir))
+    messages.extend(_check_registry_has_no_inline_definitions(name, module_path, root_dir))
+    return messages
+
+
+def _check_no_extra_entries(name: str, module_path: str, root_dir: Path) -> list[Error]:
+    """ADR 0003's ticket #77 amendment: a version's root may hold nothing
+    besides `registry.py` — not a subpackage, not a stray helper module.
+    Squash (ADR 0009) depends on this to guarantee that deleting an absorbed
+    version's directory can never drop code a surviving version still needs.
+    """
+    if not root_dir.is_dir():
+        return []
+    extras = sorted(entry.name for entry in root_dir.iterdir() if entry.name not in ALLOWED_ROOT_ENTRIES)
+    if not extras:
+        return []
+    return [
+        Error(
+            f"version {name!r}'s root {module_path!r} contains {extras!r} — a version's root may hold "
+            "only registry.py (ADR 0003's ticket #77 amendment). Move implementation code outside the "
+            "version tree; registry.py should only import it.",
+            id="apiver.E010",
+        )
+    ]
+
+
+def _check_registry_has_no_inline_definitions(name: str, module_path: str, root_dir: Path) -> list[Error]:
+    """ADR 0003's ticket #77 amendment: `registry.py` may contain only
+    imports, its `Version(...)`/`.derive()` line, and
+    `register()`/`override()`/`remove()` calls — never a `class`/`def` of its
+    own. Parses the source rather than reflecting on the live handler
+    objects `register()`/`override()` already saw (ADR 0003 item 2's "no
+    stack-frame introspection" reasoning applies here too): this check has
+    no register()/override() call to hook, only a file on disk to look at.
+    """
+    registry_path = root_dir / "registry.py"
+    if not registry_path.is_file():
+        return []  # apiver.E002 already reports a missing registry.py
+
+    try:
+        tree = ast.parse(registry_path.read_text(), filename=str(registry_path))
+    except SyntaxError as exc:
+        return [Error(f"{registry_path} could not be parsed: {exc}", id="apiver.E011")]
+
+    definitions = sorted(
+        {
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+    )
+    if not definitions:
+        return []
+    return [
+        Error(
+            f"version {name!r}'s {registry_path} defines {definitions!r} inline — it may only contain "
+            "imports, its Version(...)/.derive() line, and register()/override()/remove() calls (ADR "
+            "0003's ticket #77 amendment). Move the definition to a module outside the version tree "
+            "and import it instead.",
+            id="apiver.E011",
+        )
     ]
 
 
