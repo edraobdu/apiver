@@ -126,12 +126,14 @@ existing code from wherever it already lives — it does not, and will not, relo
 
 The fastest way to see the whole mechanism is to change one field's type on one endpoint in a
 brand-new version. The mechanism itself is deliberately not tied to any generated file layout —
-`register()`/`override()` work on whatever class you hand them, imported from wherever it lives. The
-one thing apiver does fix is where the wiring happens: `registry.py`. (In a real project, `apiver mount
-v2 --from v1` scaffolds that file for you — see [Adopting apiver](#adopting-apiver) below.)
+`register()`/`override()` work on whatever class you hand them, imported from wherever it lives. The one
+thing apiver does fix is where the wiring happens: `registry.py` and the generated Aggregation Root.
+Below, both are written out by hand for each version so the mechanism itself is visible; a real project
+generates all four files instead — see [Adopting apiver](#adopting-apiver) below for the actual
+commands.
 
-Start with an ordinary DRF resource — nothing apiver-specific about it yet. `price_cents` is an
-integer, the same way every other amount in the system is stored — cents, to avoid float rounding:
+Start with an ordinary DRF resource — nothing apiver-specific about it yet. `price` is a `DecimalField`
+on both the model and the serializer today; clients read and write it as a decimal string, `"19.99"`:
 
 ```python
 # your code, unchanged
@@ -141,7 +143,7 @@ from rest_framework import serializers, viewsets
 class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
-        fields = ["id", "name", "price_cents"]
+        fields = ["id", "name", "price"]
 
 
 class ProductViewSet(viewsets.ModelViewSet):
@@ -150,7 +152,8 @@ class ProductViewSet(viewsets.ModelViewSet):
 ```
 
 Declare it as your base version — this is the one-time step that turns "an app" into "an app with a
-version":
+version" (in a real project, `apiver init` writes this file for you by walking your existing
+`ROOT_URLCONF`):
 
 ```python
 # api/v1/registry.py
@@ -161,7 +164,8 @@ v1 = Version("v1")
 v1.register("products", ProductViewSet, basename="products")
 ```
 
-Mount it — this is ordinary Django, no namespace to hand-write:
+Mount it — this is ordinary Django, no namespace to hand-write, and `apiver init` writes this file too,
+alongside `registry.py`:
 
 ```python
 # api/urls.py — the Aggregation Root
@@ -174,14 +178,25 @@ urlpatterns = [
 ]
 ```
 
-Now say V2 needs to stop making clients divide by 100 in their own code — `price_cents` (an int) becomes
-`price` (a decimal string). This is the change-shape that comes up constantly in real API versioning:
-not a new field, an existing one reshaped out from under the clients still calling V1. The override
-classes are ordinary additions — apiver doesn't ask you to put them anywhere in particular:
+Now say the mobile team wants V2 to speak in integer cents instead — the representation every other
+money field in the API already uses, and one that doesn't need a decimal parser client-side. The
+database column doesn't move on the same day the wire format does: migrating `Product.price` to an
+integer-cents column is a separate, larger change nobody's ready to ship yet, and flipping it today
+would break every client still calling V1 with decimal strings. So V2 only changes the boundary — the
+serializer converts cents to and from the model's Decimal, the model itself doesn't move:
 
 ```python
-from drf_spectacular.utils import extend_schema_field
+from decimal import Decimal
+
 from rest_framework import serializers
+
+
+class CentsField(serializers.IntegerField):
+    def to_representation(self, value):
+        return int(value * 100)
+
+    def to_internal_value(self, data):
+        return Decimal(super().to_internal_value(data)) / 100
 
 
 # Classes registered on a non-base version must carry the version's suffix —
@@ -189,14 +204,7 @@ from rest_framework import serializers
 # enforces this at override() time so two same-named classes in different
 # versions can never collide silently.
 class ProductSerializerV2(ProductSerializer):
-    price = serializers.SerializerMethodField()
-
-    class Meta(ProductSerializer.Meta):
-        fields = [*(f for f in ProductSerializer.Meta.fields if f != "price_cents"), "price"]
-
-    @extend_schema_field(str)
-    def get_price(self, obj):
-        return f"{obj.price_cents / 100:.2f}"
+    price = CentsField()
 ```
 
 ```python
@@ -205,7 +213,8 @@ class ProductViewSetV2(ProductViewSet):
 ```
 
 `derive()` and `override()` are the entire delta — `registry.py` only ever states what changed, never
-defines it:
+defines it (in a real project, `apiver mount v2 --from v1` scaffolds this file, already wired with its
+own schema/docs routes):
 
 ```python
 # api/v2/registry.py
@@ -216,7 +225,8 @@ v2 = v1.derive("v2")
 v2.override("products", ProductViewSetV2, basename="products")
 ```
 
-Mount it — same Aggregation Root as before, one added `include()`, nothing else in it changes:
+Mount it — same Aggregation Root as before, one added `include()`, nothing else in it changes.
+`apiver mount` writes this edit too, the same run that scaffolds `registry.py` above:
 
 ```diff
  # api/urls.py — the Aggregation Root
@@ -231,12 +241,19 @@ Mount it — same Aggregation Root as before, one added `include()`, nothing els
  ]
 ```
 
-That's the whole change. `GET /api/v2/products/` now returns `price: "19.99"`; `GET /api/v1/products/`
-still returns `price_cents: 1999`, and never changed. If `products/` were one endpoint out of thirty,
-the other twenty-nine would need zero lines touched — V2 never mentions them, and they'd still resolve,
-unchanged, straight through to V1's exact `ProductViewSet` object. That's the whole pitch: one field
-reshaped, one subclass, one `override()` call, and a second complete API surface exists next to the
-first one.
+That's the whole change. `GET /api/v2/products/` now returns `price: 1999`, and a `POST` with `price:
+1999` writes `Decimal("19.99")` to the same column V1 always has; `GET /api/v1/products/` still returns
+`price: "19.99"`, and never changed — old clients keep working, untouched, for exactly as long as it
+takes the new app version to roll out. If `products/` were one endpoint out of thirty, the other
+twenty-nine would need zero lines touched — V2 never mentions them, and they'd still resolve, unchanged,
+straight through to V1's exact `ProductViewSet` object. That's the whole pitch: one field reshaped, one
+subclass, one `override()` call, and a second complete API surface exists next to the first one.
+
+Once V2's adoption is effectively total, the two changes that were deliberately kept apart can finally
+happen together: migrate `Product.price` to an integer-cents column, delete `CentsField` from
+`ProductSerializerV2` now that a plain `IntegerField` matches the column directly, and
+[deprecate V1](#lifecycle-deprecation-and-sunset) for the stragglers left on decimal strings. None of
+that is a new version — it's cleanup inside the version that already won.
 
 ## Adopting apiver
 
@@ -400,6 +417,17 @@ under the chosen namespace falls back to the bare name — load-bearing, since a
 every `reverse()` call with this one still needs its admin, login page, and health check to resolve
 while a versioned request is being served — but a genuinely unknown name still raises `NoReverseMatch`.
 
+**Out-of-band code needs one of two different answers, not one.** For most Celery tasks, cron jobs, and
+management commands — the ordinary case, where a link just needs to point at "whatever's current" —
+point `APIVER_OUT_OF_BAND_ALIAS` at your rolling `Alias` (`stable`, `latest`). The task keeps generating
+correct links as that `Alias` is re-pointed at newer versions over time, with no code change on its
+side. But a link that has to stay valid on its own timeline — an email sent today that a customer might
+click in six months, a webhook payload, a generated PDF — can't ride an `Alias` that may have moved on
+by the time anything follows it. For those, resolve against a specific `Version`'s namespace directly
+(`reverse(f"{v2.namespace}:products-detail", ...)`) instead of letting `apiver.drf.reverse` pick one for
+you: a `Version`'s namespace is fixed for as long as the `Version` exists, `Alias` or no `Alias`, so the
+link keeps meaning exactly what it meant the day it was sent.
+
 `HyperlinkedRelatedField` and friends get the same version-aware resolution automatically, via a small
 patch DRF's `get_url` applies on import; set `APIVER_PATCH_HYPERLINKED_FIELDS = False` to opt out. See
 [ADR 0005](docs/adr/0005-intra-version-hyperlinking.md) for the full design.
@@ -458,7 +486,7 @@ reads only the committed `apiver.toml` and needs neither.
 | `APIVER_VERSION_SCHEME` | The project's version-naming Scheme — `sequential` (default), `semver`, or `date` — used to validate, format, and chronologically order version names ([ADR 0008](docs/adr/0008-version-schemes.md)). |
 | `APIVER_MAX_LIVE_VERSIONS` | Warning-level system check threshold for live versions (default **3**) — a maintenance-burden signal, not a hard limit; pair with `manage.py check --fail-level WARNING` in CI if you want it hard. |
 | `APIVER_MANIFEST_PATH` | Where `apiver.toml` is read/written, if not the project root. |
-| `APIVER_OUT_OF_BAND_ALIAS` | Alias namespace `apiver.drf.reverse` falls back to for code with no request in reach (a Celery task, a management command). |
+| `APIVER_OUT_OF_BAND_ALIAS` | Alias namespace `apiver.drf.reverse` falls back to for code with no request in reach (a Celery task, a management command) — set to your rolling `Alias` (`stable`), not a fixed version. |
 | `APIVER_PATCH_HYPERLINKED_FIELDS` | Set to `False` to opt out of apiver's version-aware `HyperlinkedRelatedField.get_url` patch. |
 
 ## Requirements
