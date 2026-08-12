@@ -46,6 +46,15 @@ def test_diff_always_prints_the_blind_spots_disclaimer():
     assert "SerializerMethodField" in result.stdout
 
 
+def test_diff_reports_a_permission_classes_change():
+    result = _run("diff", "v1", "v2")
+
+    assert result.returncode == 0, result.stderr
+    assert "permission_classes changed on 'payments'" in result.stdout
+    assert "AllowAny" in result.stdout
+    assert "IsAuthenticated" in result.stdout
+
+
 def test_diff_json_emits_structured_data_and_disclaimer_on_stderr():
     result = _run("diff", "v1", "v2", "--json")
 
@@ -53,6 +62,9 @@ def test_diff_json_emits_structured_data_and_disclaimer_on_stderr():
     payload = json.loads(result.stdout)
     assert any(f["field"] == "version" for f in payload["fields"])
     assert any(r["path"] == "payments/" and r["kind"] == "removed" for r in payload["resources"])
+    assert any(
+        a["resource"] == "payments" and a["attribute"] == "permission_classes" for a in payload["attributes"]
+    )
     assert "SerializerMethodField" in result.stderr
 
 

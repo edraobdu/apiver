@@ -1,6 +1,6 @@
 from django.http import JsonResponse
 from django.views import View
-from rest_framework import serializers, viewsets
+from rest_framework import permissions, serializers, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -40,9 +40,13 @@ class PaymentV2Serializer(serializers.Serializer):
 class PaymentViewSetV2(viewsets.ViewSet):
     """Overrides PaymentViewSet, one version deep, with a different detail
     shape and no list route — used by the generic override-mechanics tests,
-    which register it onto a Version literally named "v2"."""
+    which register it onto a Version literally named "v2". Also tightens
+    `permission_classes` from PaymentViewSet's inherited default
+    (`AllowAny`), giving `diff_view_attributes` (ticket #79) a real
+    attribute change to detect in the diff/check fixtures."""
 
     serializer_class = PaymentV2Serializer
+    permission_classes = [permissions.IsAuthenticated]
 
     def retrieve(self, request, pk=None):
         return Response({"id": pk, "version": "v2"})
