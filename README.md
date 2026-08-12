@@ -252,11 +252,21 @@ $ uv add apiver   # or your project's usual dependency manager
 Add `"apiver"` to `INSTALLED_APPS` — it has no models, but its system checks (layout, manifest
 freshness, live-version count) only register through `AppConfig.ready()` — and four settings:
 
-```python
-APIVER_ROOT_DIR = "api"  # dotted path to the package holding every version
-APIVER_ROOT_PREFIX = "api/"  # absolute URL path every version mounts under
-APIVER_BASE_VERSION = "v1"  # the name init adopts the existing API as
-APIVER_VERSIONS = ["v1"]  # hand-maintained list of live version names
+```diff
+ # config/settings.py
+ INSTALLED_APPS = [
+     "django.contrib.contenttypes",
+     "django.contrib.auth",
+     "rest_framework",
+     "drf_spectacular",
++    "apiver",
+     ...
+ ]
++
++APIVER_ROOT_DIR = "api"  # dotted path to the package holding every version
++APIVER_ROOT_PREFIX = "api/"  # absolute URL path every version mounts under
++APIVER_BASE_VERSION = "v1"  # the name init adopts the existing API as
++APIVER_VERSIONS = ["v1"]  # hand-maintained list of live version names
 ```
 
 Then:
