@@ -12,11 +12,12 @@ process, so they're recorded together.
 
 ### Layout
 
-1. **Shape:** a flat per-version package — `api/v2/serializers.py`, `api/v2/views.py`,
-   `api/v2/registry.py` (the file that performs that Version's `register()`/`override()`/`remove()`
-   calls). No package-per-resource subpackaging; ticket 03's constraint (version-suffixed class names)
-   already gets schema correctness without it, and this project doesn't need more structure than that
-   yet.
+1. **Shape:** a version's root is a package containing `api/v2/registry.py` (the file that performs
+   that Version's `register()`/`override()`/`remove()` calls) — the one file every Version, Base or
+   Authored, is required to have. Nothing else about the root's contents is required or forbidden; a
+   Version's serializers, views, and any other implementation code live wherever the developer's project
+   already organizes them, discovered by `registry.py`'s imports rather than relocated into the version
+   root. *(Updated by the ticket #73 amendment below — see there for what this replaced and why.)*
 
 2. **Two enforcement mechanisms, not one**, because they have different information available at
    different times:
@@ -24,13 +25,15 @@ process, so they're recorded together.
      time — the call already holds the class object, so it checks `cls.__name__` against the Version's
      suffix and raises loudly on mismatch. No stack-frame introspection needed.
    - **Directory shape**: enforced via a Django system check — idiomatic, runs in `manage.py check`/CI,
-     doesn't need to know what file called `register()`.
+     doesn't need to know what file called `register()`. Now checks a single thing for every Version,
+     Base or Authored alike: does `registry.py` exist.
 
-3. **Non-uniform layout is allowed across versions.** The Base Version may stay discovered-and-scattered
-   while authored Versions are structured. `migrate` gives the base the *same* per-version package root
-   (`api/v1/`) as authored versions, but writes only `registry.py` into it — the existing
-   `serializers.py`/`views.py` never move. This gives every version a uniform root without forcing a
-   special case into tooling that walks `api/<version>/`.
+3. **Layout is uniform across every version, Base and Authored alike.** Every version gets the same
+   per-version package root (`api/v1/`, `api/v2/`, ...) with `registry.py` written into it — the
+   existing `serializers.py`/`views.py`, and any code an Authored Version's overrides need, never move
+   there. This is the Base Version's original treatment (item 3 as first written) extended to every
+   version rather than left as its exception; see the ticket #73 amendment below for why the asymmetry
+   didn't hold up.
 
 4. **The generated `registry.py` is a one-shot scaffold, not regenerated.** Hand-editable after
    `migrate` writes it once — like Django's own `startapp` boilerplate. Regenerating on every `migrate`
@@ -96,7 +99,32 @@ process, so they're recorded together.
 
 ## Consequences
 
-Squash (ticket 09) inherits two concrete facts to verify: it must read the Base Version's source
-*through* `api/v1/registry.py`'s pointers rather than assuming a flat scattered layout, and it can rely
-on the manifest's resolution table being a faithful, current snapshot **only** immediately after a
+Squash (ticket 09) inherits two concrete facts to verify: it must read every version's source *through*
+its `registry.py`'s pointers rather than assuming a flat, generated-in-place layout, and it can rely on
+the manifest's resolution table being a faithful, current snapshot **only** immediately after a
 `manifest --check` passes — never as an unconditional given.
+
+**Amendment (ticket #73): items 1–3 rewritten — `serializers.py`/`views.py` are no longer required, or
+even expected, inside an Authored Version's root; only `registry.py` is.** As originally written, the
+Base Version got the "discovered, not relocated" treatment (item 3) but Authored Versions didn't — a
+freshly-`mount`ed Authored Version had to have hand-created `serializers.py`/`views.py` files to pass
+`apiver.E002`, a requirement the README's own quickstart never followed (it inlines override classes
+directly in `registry.py` instead).
+
+Grilled directly: apiver's job is to enforce *where routing is declared*, not *where implementation code
+lives* — a project adopting apiver already has a working structure for serializers and views, and
+forcing a second one just for versions it authors later contradicts the same "don't move a file"
+promise item 3 already made for the base. The asymmetry wasn't a deliberate trade-off surfacing two
+different needs; it was an oversight from generalizing the base's exemption only as far as the ticket
+in front of it required. Extending it fully removes the asymmetry rather than justifying it.
+
+Consequence for squash: none. Item 1's finding above already generalizes cleanly — squash was always
+going to read source through live class reflection (`__mro__`, module introspection via
+`inspect`/`__module__`), never a hardcoded path, because that's the only way it already worked for the
+Base Version's scattered layout. Authored Versions now get the identical treatment, not a new one.
+
+`registry.py`'s role sharpens as a consequence: it's the one artifact every version is guaranteed to
+have, so it becomes the de facto index of a version's whole registration surface — every
+`register()`/`override()`/`remove()` call in one file, everything else imported. Not mechanically
+enforced (nothing stops a developer from defining a class inline there), but it's the convention the
+README now models throughout.

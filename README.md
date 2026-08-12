@@ -87,6 +87,15 @@ or it isn't; it's `Live`, `Deprecated`, `Sunset`, or `Archived`; a route is inhe
 codebase and becomes an ordinary fact about the project's structure — visible in `apiver versions`,
 committed in `apiver.toml`, reviewable in a diff.
 
+**apiver enforces where routing is declared, never where the rest of your code lives.** The only file
+any version — the base you adopted or a version you author later — is ever required to have is
+`registry.py`, the one place its `register()`/`override()`/`remove()` calls happen. Your serializers,
+views, and everything else stay wherever your project already organizes them; apiver has no opinion on
+your file layout beyond that one file, the same way it has no opinion on your data layer or business
+logic — how a field actually changes type in the database, what a request is allowed to do, how a
+queryset gets built. apiver's job stops at the HTTP-facing shape of what crosses the wire, once per
+version.
+
 ## What you get
 
 - **A complete surface per version.** `GET /api/v2/users/` works even though V2 never mentions users.
@@ -129,9 +138,10 @@ production, V2 is a delta against it," apiver is built around exactly that menta
 ## Quickstart: overriding a field
 
 The fastest way to see the whole mechanism is to add one field to one endpoint in a brand-new version.
-This is deliberately not tied to any generated file layout — it's the whole idea on one screen. (In a
-real project, `apiver mount v2 --from v1` scaffolds this file for you — see
-[Adopting apiver](#adopting-apiver) below.)
+The mechanism itself is deliberately not tied to any generated file layout — `register()`/`override()`
+work on whatever class you hand them, imported from wherever it lives. The one thing apiver does fix is
+where the wiring happens: `registry.py`. (In a real project, `apiver mount v2 --from v1` scaffolds that
+file for you — see [Adopting apiver](#adopting-apiver) below.)
 
 Start with an ordinary DRF resource — nothing apiver-specific about it yet:
 
@@ -163,34 +173,38 @@ v1 = Version("v1")
 v1.register("products", ProductViewSet, basename="products")
 ```
 
-Now say V2 adds a `discount_price_cents` field to the same resource. `derive()` and `override()` are
-the entire delta:
+Now say V2 adds a `discount_price_cents` field to the same resource. The override classes are ordinary
+additions to your existing `products` module — apiver doesn't ask you to put them anywhere new:
 
 ```python
-# api/v2/registry.py
+# products/serializers.py — same file as ProductSerializer above, just grown by one class
 from rest_framework import serializers
 
-from api.v1.registry import v1
-from products.serializers import ProductSerializer
-from products.views import ProductViewSet
-from apiver.drf import Version
 
 # Classes registered on a non-base version must carry the version's suffix —
 # drf-spectacular names schema components off the class name alone, and apiver
 # enforces this at override() time so two same-named classes in different
 # versions can never collide silently.
-
-
 class ProductSerializerV2(ProductSerializer):
     discount_price_cents = serializers.IntegerField(read_only=True)
 
     class Meta(ProductSerializer.Meta):
         fields = [*ProductSerializer.Meta.fields, "discount_price_cents"]
+```
 
-
+```python
+# products/views.py — same file as ProductViewSet above, just grown by one class
 class ProductViewSetV2(ProductViewSet):
     serializer_class = ProductSerializerV2
+```
 
+`derive()` and `override()` are the entire delta — `registry.py` only ever states what changed, never
+defines it:
+
+```python
+# api/v2/registry.py
+from api.v1.registry import v1
+from products.views import ProductViewSetV2
 
 v2 = v1.derive("v2")
 v2.override("products", ProductViewSetV2, basename="products")
