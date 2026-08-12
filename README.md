@@ -468,9 +468,9 @@ target is still validated as a real, scheme-conforming version. See
 ## CLI at a glance
 
 `apiver` is a standalone command, not a `manage.py` subcommand, so it can introspect a project offline.
-`init`, `mount`, `alias` and `manifest` need Django settings resolved (`--settings`, then
-`DJANGO_SETTINGS_MODULE`, then `[tool.apiver].django_settings_module` in `pyproject.toml`); `versions`
-reads only the committed `apiver.toml` and needs neither.
+`init`, `mount`, `alias`, `manifest`, `diff`, and `check` need Django settings resolved (`--settings`,
+then `DJANGO_SETTINGS_MODULE`, then `[tool.apiver].django_settings_module` in `pyproject.toml`);
+`versions` reads only the committed `apiver.toml` and needs neither.
 
 | Command | What it does |
 | --- | --- |
@@ -479,6 +479,8 @@ reads only the committed `apiver.toml` and needs neither.
 | `apiver alias NAME --from VERSION` | Declares a movable name pointing at an already-mounted version. |
 | `apiver manifest [--check]` | Writes `apiver.toml`, a committed snapshot of every version's resolution table; `--check` exits non-zero if it's stale, the same idiom as `makemigrations --check`. |
 | `apiver versions` | Prints lineage, frozen status, lifecycle state, alias pointers, and defined-vs-inherited routes per version — reading only the manifest, without booting the project. |
+| `apiver diff OLD NEW [--json]` | Compares two versions' composed OpenAPI schemas and reports every field/resource change between them — human-readable by default, `--json` for tooling. Always prints the schema-diff blind-spots disclaimer alongside the result. |
+| `apiver check [VERSION ...]` | CI-facing wrapper around `diff`: prints every authored live version's diff against its parent (or just the versions named). Every schema-visible change already came from an explicit `register()`/`override()`/`remove()` call, so `check` reports rather than gates — it exits non-zero only on a tool/config error, never because a diff found changes. See [#79](https://github.com/edraobdu/apiver/issues/79) for whether a future version should flag some of them anyway. |
 
 ## Settings
 
@@ -521,12 +523,6 @@ $ pip install git+https://github.com/edraobdu/apiver.git
 **0.1 is the complete tool**, not a minimal one — everything below ships before the first tag, not
 after it:
 
-- **[`apiver diff` and `apiver check`](https://github.com/edraobdu/apiver/issues/76).**
-  Schema-diff-based breaking-change detection between two versions, built on the same manifest `apiver
-  versions` already reads. It catches every "Yes"-marked row in the
-  [change-shape table](#whats-supported-today) above and, just as importantly, documents — not silently
-  papers over — the rows already known to be schema-blind (`SerializerMethodField` output, permissions,
-  pagination, filtering, default ordering, throttling, error shape).
 - **[Multiple `--prefix` values for `apiver init`](https://github.com/edraobdu/apiver/issues/61).**
   Adopting a project whose routes are scattered across several unrelated roots (`api/`, `legacy/`,
   `internal-api/`) shouldn't need one `init` run per root plus hand-written `register()` calls for
