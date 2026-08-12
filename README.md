@@ -28,6 +28,7 @@ complete, working API surface without duplicating the 95% of it that didn't chan
 - [The routing/schema boundary](#the-routingschema-boundary)
 - [Lifecycle: deprecation and sunset](#lifecycle-deprecation-and-sunset)
 - [Squashing a long delta chain](#squashing-a-long-delta-chain)
+- [Archiving a squashed-away version](#archiving-a-squashed-away-version)
 - [Version-aware links: apiver.drf.reverse](#version-aware-links-apiverdrfreverse)
 - [Version schemes](#version-schemes)
 - [CLI at a glance](#cli-at-a-glance)
@@ -425,8 +426,8 @@ declarations — it never touches a View or Serializer's source, so there's no c
 $ apiver squash v3
 wrote .../apiversions/v3/registry.py
 apiver: 'v3's registry.py now explicitly overrides every route it inherited from v1, v2 — its parent
-chain is unchanged, so nothing is safe to remove yet. `apiver remove` (not yet built) is what will cut
-the parent link and delete their directories.
+chain is unchanged. `apiver remove v2` is what will cut that link, one ancestor at a time, working back
+through the chain.
 ```
 
 `apiver squash v3` walks `v3`'s *whole* ancestor chain (however deep — not just its immediate parent) and
@@ -451,11 +452,50 @@ apiver: squash refuses to run — every absorbed version must satisfy ADR 0003's
 
 **Squash never deletes anything, and it never touches the parent chain.** `v1` and `v2` stay exactly
 where they are, still imported, still live — `v3`'s `registry.py` is just now explicit about everything
-it already serves. Actually cutting the chain (dropping `v3`'s parent link, converting these `override()`
-calls to `register()`, deleting `v1`/`v2`, unmounting them from the Aggregation Root and
-`APIVER_VERSIONS`) is `apiver remove`'s job — planned, not yet built (see [Roadmap](#roadmap)).
-`APIVER_MAX_LIVE_VERSIONS` (default **3**) is the warning that tells you it's time to start thinking about
-that; see [ADR 0009](docs/adr/0009-squash-design.md) for the full design.
+it already serves. `APIVER_MAX_LIVE_VERSIONS` (default **3**) is the warning that tells you it's time to
+start thinking about archiving one of them; see [ADR 0009](docs/adr/0009-squash-design.md) for the full
+design.
+
+## Archiving a squashed-away version
+
+Once every direct child of a version already resolves its entire contribution explicitly — via a prior
+`apiver squash` — that version is safe to archive. `apiver remove` is the operation that actually does
+it: a version stays **Live** (counted, mounted, still answering) through both `Deprecated` and
+past-`Sunset` states; it only becomes **Archived** once its mount is removed.
+
+```console
+$ apiver remove v1
+wrote .../apiversions/v2/registry.py
+wrote .../apiversions/urls.py
+apiver: v2 is now an independent Base Version — 'v1's parent link has been cut.
+apiver: 'v1' is now Archived — drop it from APIVER_VERSIONS and APIVER_BASE_VERSION in settings.py, then
+`git rm -r` its directory once you've confirmed nothing else needs it.
+```
+
+`apiver remove v1` rewrites every direct child's `registry.py` itself — cutting the `.derive('v1')` line
+and flipping every `override()` that targeted a key `v1` introduced into `register()` — and drops `v1`'s
+mount from the Aggregation Root's `urls.py`. If `v1` had branched into more than one child, each becomes
+its own independent Base Version; apiver's model already tolerates more than one.
+
+It refuses, writing nothing, if any direct child doesn't yet explicitly resolve everything `v1`
+contributes:
+
+```console
+$ apiver remove v1
+apiver: remove refuses to run — every direct child of 'v1' must already resolve its entire contribution
+explicitly (via a prior `apiver squash`) before its mount can be cut:
+- 'v2' does not yet explicitly resolve every key 'v1' contributes — missing ['payments']. Run `apiver
+  squash v2` first.
+```
+
+It also refuses a version that was never deprecated — no `Deprecation`/`Sunset` headers were ever sent to
+callers — unless `--force` is passed; pulling a mount out from under live callers with no prior warning
+needs an explicit override.
+
+**`remove` never deletes a directory itself, and it never edits `settings.py`.** Both stay hand-edits:
+drop the archived version from `APIVER_VERSIONS` (and `APIVER_BASE_VERSION`, if it named it) yourself,
+then `git rm -r` its directory once you've confirmed nothing else needs it — an accidental deletion of
+source code is a different order of risk than a rewritten text file.
 
 ## Version-aware links: apiver.drf.reverse
 
@@ -544,6 +584,7 @@ then `DJANGO_SETTINGS_MODULE`, then `[tool.apiver].django_settings_module` in `p
 | `apiver diff OLD NEW [--json]` | Compares two versions' composed OpenAPI schemas, plus each shared registration's `permission_classes`/`authentication_classes`/`pagination_class`/`filter_backends`/`throttle_classes`/`ordering`, and reports every field/resource/attribute change between them — human-readable by default, `--json` for tooling. Always prints the schema-diff blind-spots disclaimer alongside the result. |
 | `apiver check [VERSION ...]` | CI-facing wrapper around `diff`: prints every authored live version's diff against its parent (or just the versions named). Every reported change already came from an explicit `register()`/`override()`/`remove()` call, so `check` reports rather than gates — it exits non-zero only on a tool/config error, never because a diff found changes. |
 | `apiver squash VERSION` | Makes `VERSION`'s `registry.py` an explicit, complete list of every route it resolves from its whole ancestor chain — see [Squashing a long delta chain](#squashing-a-long-delta-chain). Its parent chain is left untouched. Refuses, writing nothing, if any absorbed version doesn't satisfy the registry-only rule from [Philosophy](#philosophy). Auto-applied to `VERSION`'s `registry.py`; never deletes anything. |
+| `apiver remove VERSION [--force]` | Archives `VERSION` — see [Archiving a squashed-away version](#archiving-a-squashed-away-version). Cuts every direct child's parent link (each becoming its own independent Base Version) and drops `VERSION`'s mount from the Aggregation Root. Refuses, writing nothing, unless every direct child already resolves `VERSION`'s entire contribution explicitly, or if `VERSION` was never deprecated (`--force` overrides that). Never touches `settings.py`; never deletes `VERSION`'s directory. |
 
 ## Settings
 
@@ -595,13 +636,6 @@ after it:
   (`permission_classes`, authentication) that forwards to every route without an explicit `override()`
   per endpoint. Today's workaround — overriding each affected endpoint explicitly — stays the documented
   path unless this lands with a real mechanism behind it.
-- **`apiver remove`.** [`apiver squash`](#squashing-a-long-delta-chain) leaves the versions it absorbs on
-  disk, unreferenced but not deleted — deleting them, unmounting them from the Aggregation Root, and
-  dropping them from `APIVER_VERSIONS` is a distinct operation with its own blast radius, planned as its
-  own future ticket (not yet filed). **Today's workaround** needs no new tooling: `git rm -r` the absorbed
-  version's directory by hand once `squash` confirms nothing still references it, and drop it from
-  `APIVER_VERSIONS`/the Aggregation Root yourself.
-
 **apiver will never relocate your existing files** — see [Philosophy](#philosophy). `apiver init`
 discovers and imports code from wherever it already lives; that boundary doesn't move as the tool
 matures, it's a permanent design decision, not a gap waiting on a `--move` flag.

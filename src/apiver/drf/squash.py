@@ -18,8 +18,9 @@ implicit route becomes a real `override()` call (a `register()` would raise
 — the parent chain still resolves the key), because the parent hasn't gone
 anywhere. Squash never deletes anything and never suggests deleting anything
 by hand; cutting the parent link, converting these `override()` calls into
-`register()`, and deleting a directory is a separate, not-yet-built `apiver
-remove`'s job.
+`register()`, and dropping the ancestor's mount is `apiver remove`'s job
+(ticket #84) — it still never deletes a directory itself, only prints that
+one is now safe for `git rm -r`.
 """
 
 from __future__ import annotations
@@ -50,7 +51,7 @@ class SquashResult:
     #: Ancestors whose implicit routes are now explicit `override()` calls
     #: on the target, oldest first. Their parent link is untouched — they
     #: are still imported, still live, not yet safe to delete (that's
-    #: `apiver remove`'s job, once it exists).
+    #: `apiver remove`'s job).
     absorbed: list[str] = field(default_factory=list)
 
 

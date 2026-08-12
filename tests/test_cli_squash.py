@@ -51,8 +51,7 @@ def test_squash_reports_the_absorbed_versions():
 
     assert result.returncode == 0, result.stderr
     assert "v1, v2" in result.stdout
-    assert "apiver remove" in result.stdout
-    assert "safe to remove yet" in result.stdout
+    assert "apiver remove v2" in result.stdout
 
 
 def test_squashed_registry_is_valid_python_that_reimports_cleanly():

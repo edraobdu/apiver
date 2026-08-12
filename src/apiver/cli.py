@@ -216,10 +216,41 @@ def _cmd_squash(*, version: str) -> int:
     if result.absorbed:
         print(
             f"apiver: {result.target!r}'s registry.py now explicitly overrides every route it "
-            f"inherited from {', '.join(result.absorbed)} — its parent chain is unchanged, so nothing "
-            "is safe to remove yet. `apiver remove` (not yet built) is what will cut the parent link "
-            "and delete their directories."
+            f"inherited from {', '.join(result.absorbed)} — its parent chain is unchanged. `apiver "
+            f"remove {result.absorbed[-1]}` is what will cut that link, one ancestor at a time, working "
+            "back through the chain."
         )
+    return 0
+
+
+def _cmd_remove(*, version: str, force: bool) -> int:
+    from .drf.remove import RemoveError, remove_version
+
+    try:
+        result = remove_version(version, force=force)
+    except RemoveError as exc:
+        print(f"apiver: {exc}", file=sys.stderr)
+        return 1
+
+    for path in result.registry_paths:
+        print(f"wrote {path}")
+    print(f"wrote {result.aggregation_path}")
+
+    if result.children:
+        plural = len(result.children) != 1
+        print(
+            f"apiver: {', '.join(result.children)} {'are' if plural else 'is'} now "
+            f"independent Base Version{'s' if plural else ''} — {result.target!r}'s parent link has "
+            "been cut."
+        )
+
+    settings_hint = "APIVER_VERSIONS"
+    if result.was_base_version:
+        settings_hint += " and APIVER_BASE_VERSION"
+    print(
+        f"apiver: {result.target!r} is now Archived — drop it from {settings_hint} in settings.py, then "
+        f"`git rm -r` its directory once you've confirmed nothing else needs it."
+    )
     return 0
 
 
@@ -366,6 +397,26 @@ def main(argv: list[str] | None = None) -> int:
         "becomes an explicit override() call on it.",
     )
 
+    remove_parser = subparsers.add_parser(
+        "remove",
+        help="Archive VERSION (ticket #84): once every direct child already resolves VERSION's entire "
+        "contribution explicitly (a prior `apiver squash`), cuts each child's parent link — turning it "
+        "into its own independent Base Version — and drops VERSION's mount from the Aggregation Root. "
+        "Never touches settings.py and never deletes VERSION's directory; both are printed as the "
+        "remaining hand-edits.",
+    )
+    remove_parser.add_argument(
+        "version",
+        help="The version to archive (e.g. v1) — every direct child must already resolve its entire "
+        "contribution explicitly, via a prior `apiver squash`.",
+    )
+    remove_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Archive VERSION even though it was never deprecated (no sunset ever set) — overrides the "
+        "guardrail against pulling a mount out from under live callers with no prior warning.",
+    )
+
     versions_parser = subparsers.add_parser(
         "versions",
         help="Print lineage, frozen status, lifecycle state, alias pointers and route composition "
@@ -416,6 +467,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_check(versions=args.versions)
     if args.command == "squash":
         return _cmd_squash(version=args.version)
+    if args.command == "remove":
+        return _cmd_remove(version=args.version, force=args.force)
 
     parser.error(f"unknown command {args.command!r}")
     return 2
