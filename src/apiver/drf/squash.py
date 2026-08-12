@@ -1,19 +1,25 @@
-"""`apiver squash` (ticket #77, ADR 0009): flatten a Version's whole ancestor
-chain into its own standalone, parentless `registry.py`.
+"""`apiver squash` (ticket #77, ADR 0009): make a version's own `registry.py`
+an explicit, complete list of every route it resolves — including whatever
+it only ever inherited implicitly from further up the chain — without
+touching its parent link.
 
 Operates on `registry.py` files only, never on a View or Serializer's source
 — ADR 0003's ticket #77 amendment already guarantees a version's root holds
 nothing else, so there is no class body to reason about, no LibCST, no
 `__mro__` reflection (superseding ADR 0004's original mechanism). Every
-absorbed version's root is re-validated against that same rule here (ADR
-0009 item 3), reusing `checks.py`'s own detection rather than duplicating
-it, before anything is written.
+absorbed version's root is still re-validated against that same rule here
+(ADR 0009 item 3), reusing `checks.py`'s own detection rather than
+duplicating it, before anything is written — not because squash itself
+deletes anything, but because it's the gate that guarantees a *later*
+`apiver remove` can.
 
-Squash never deletes anything. It rewrites the target's `registry.py` in
-place, auto-applied — `git diff` is the review surface (ADR 0009 item 5).
-The absorbed versions' directories are left untouched on disk, now safe but
-not required to be deleted; that's a separate future `apiver remove`
-command's job, not this one's.
+The target's parent chain is left exactly as it was: every previously-
+implicit route becomes a real `override()` call (a `register()` would raise
+— the parent chain still resolves the key), because the parent hasn't gone
+anywhere. Squash never deletes anything and never suggests deleting anything
+by hand; cutting the parent link, converting these `override()` calls into
+`register()`, and deleting a directory is a separate, not-yet-built `apiver
+remove`'s job.
 """
 
 from __future__ import annotations
@@ -41,8 +47,10 @@ class SquashError(RuntimeError):
 class SquashResult:
     target: str
     registry_path: Path
-    #: Absorbed ancestors, oldest first — left on disk, unreferenced, safe
-    #: to delete by hand or with a future `apiver remove` (ADR 0009 item 5).
+    #: Ancestors whose implicit routes are now explicit `override()` calls
+    #: on the target, oldest first. Their parent link is untouched — they
+    #: are still imported, still live, not yet safe to delete (that's
+    #: `apiver remove`'s job, once it exists).
     absorbed: list[str] = field(default_factory=list)
 
 
@@ -126,22 +134,40 @@ def _registrations_by_key(version: Version) -> dict[str, Registration]:
     return seen
 
 
-def _render_registry(target: Version, registrations: dict[str, Registration], *, mount_prefix: str) -> str:
+def _render_registry(
+    target: Version,
+    registrations: dict[str, Registration],
+    *,
+    mount_prefix: str,
+    root_dir: str,
+) -> str:
+    """`target`'s parent link is preserved — every key already resolvable
+    through it (`parent._resolved_keys()`) must be re-declared with
+    `override()`, never `register()`, since the parent still resolves it
+    and `register()` raises on a key that already exists. Only a key
+    `target` genuinely introduces itself (no ancestor ever had it) uses
+    `register()`.
+    """
+    assert target.parent is not None
     var_name = target.name
+    parent_var = target.parent.name
+    parent_keys = target.parent._resolved_keys()
     imports: dict[str, list[str]] = {}
     register_lines: list[str] = []
     errors: list[str] = []
 
     for key, registration in sorted(registrations.items(), key=lambda item: (item[0] == "schema/", item[0])):
+        verb = "override" if key in parent_keys else "register"
+
         if key == "schema/":
             register_lines.append(
-                f"{var_name}.register({key!r}, {var_name}.schema_view(prefix={mount_prefix!r}), "
+                f"{var_name}.{verb}({key!r}, {var_name}.schema_view(prefix={mount_prefix!r}), "
                 f"name={registration.name!r})"
             )
             continue
         if key == "docs/":
             register_lines.append(
-                f"{var_name}.register({key!r}, {var_name}.docs_view(), name={registration.name!r})"
+                f"{var_name}.{verb}({key!r}, {var_name}.docs_view(), name={registration.name!r})"
             )
             continue
 
@@ -158,11 +184,17 @@ def _render_registry(target: Version, registrations: dict[str, Registration], *,
         imports.setdefault(module, []).append(symbol)
 
         if registration.kind == "viewset":
-            register_lines.append(
-                f"{var_name}.register({key!r}, {symbol}, basename={registration.basename!r})"
-            )
+            register_lines.append(f"{var_name}.{verb}({key!r}, {symbol}, basename={registration.basename!r})")
         else:
-            register_lines.append(f"{var_name}.register({key!r}, {symbol}, name={registration.name!r})")
+            register_lines.append(f"{var_name}.{verb}({key!r}, {symbol}, name={registration.name!r})")
+
+    # A key the parent still resolves but target's own resolution_table
+    # doesn't means target (or something between it and the parent) removed
+    # it. That removal has to be re-declared explicitly too — without it,
+    # the freshly-written file would silently resurrect the parent's route,
+    # since nothing else in it says the key was ever removed.
+    removed_keys = parent_keys - registrations.keys()
+    remove_lines = [f"{var_name}.remove({key!r})" for key in sorted(removed_keys)]
 
     if target.deprecated:
         imports.setdefault("datetime", []).append("datetime")
@@ -184,11 +216,12 @@ def _render_registry(target: Version, registrations: dict[str, Registration], *,
         "regenerate this file again unless it's run against this version once more.",
         '"""',
         "",
-        "from apiver.drf import Version",
+        f"from {root_dir}.{parent_var}.registry import {parent_var}",
         *([""] + import_lines if import_lines else []),
         "",
-        f"{var_name} = Version({target.name!r})",
+        f"{var_name} = {parent_var}.derive({target.name!r})",
         *register_lines,
+        *remove_lines,
     ]
     if target.deprecated:
         assert target.sunset_at is not None
@@ -200,9 +233,11 @@ def _render_registry(target: Version, registrations: dict[str, Registration], *,
 
 
 def squash_version(name: str) -> SquashResult:
-    """Flatten `name`'s whole ancestor chain into its own `registry.py`
-    (ADR 0009). Refuses — writing nothing — if `name` has no parent (already
-    a Base Version), if any absorbed version fails ADR 0003's ticket #77
+    """Rewrite `name`'s own `registry.py` so every route it resolves —
+    including whatever it only ever inherited implicitly — is an explicit
+    `override()`/`register()` call, without touching its parent link (ADR
+    0009). Refuses — writing nothing — if `name` has no parent (already a
+    Base Version), if any absorbed version fails ADR 0003's ticket #77
     rule, or if any registration can't be resolved to an importable symbol.
     """
     root_dir = resolve_root_dir()
@@ -222,7 +257,7 @@ def squash_version(name: str) -> SquashResult:
     scheme = _configured_scheme()
     mount_prefix = _mount_prefix(target.name, scheme=scheme)
     registrations = _registrations_by_key(target)
-    source = _render_registry(target, registrations, mount_prefix=mount_prefix)
+    source = _render_registry(target, registrations, mount_prefix=mount_prefix, root_dir=root_dir)
 
     registry_path = _resolve_target_dir(f"{root_dir}.{target.name}") / "registry.py"
     registry_path.write_text(source)
