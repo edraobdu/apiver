@@ -192,7 +192,21 @@ class Version:
         if self._frozen:
             raise RuntimeError(f"version {self.name!r} is frozen and cannot be {verb}.")
 
-    def _check_suffix(self, verb: str, handler: Any) -> None:
+    def _current_handler_for(self, key: str) -> Any | None:
+        """The handler currently resolving `key` through this Version's own
+        registrations or its parent chain, if any — used by `override()` to
+        exempt a call that reaffirms this exact object, unchanged, from the
+        suffix check (apiver squash, ADR 0009 item 4's finding)."""
+        registration = self._registrations.get(key)
+        if registration is not None:
+            return registration.handler
+        if key in self._removed:
+            return None
+        if self.parent is not None:
+            return self.parent._current_handler_for(key)
+        return None
+
+    def _check_suffix(self, verb: str, handler: Any, *, exempt: bool = False) -> None:
         """Refuse a class-based handler whose name doesn't carry this
         Version's suffix (ticket 11, ADR 0003 item 2).
 
@@ -209,8 +223,16 @@ class Version:
         the promise that adopting apiver leaves V1's code exactly where it
         is. Non-class handlers (plain functions) are exempt too — there is
         no `__name__` naming convention to enforce for those.
+
+        `exempt=True` (only ever passed by `override()`) covers a third
+        case: reaffirming the *exact same* handler object that already
+        resolves at this key, unchanged. apiver squash (ADR 0009) needs
+        this to make an inherited-unchanged registration explicit without
+        forcing a rename — the collision this check exists to catch can't
+        happen here, since that object was already part of this Version's
+        composed schema, under this exact name, before the call.
         """
-        if self.parent is None or not isinstance(handler, type):
+        if self.parent is None or not isinstance(handler, type) or exempt:
             return
         suffix = self.name.upper()
         if suffix not in handler.__name__:
@@ -293,7 +315,7 @@ class Version:
             )
 
         kind = _classify(handler)
-        self._check_suffix("overridden", handler)
+        self._check_suffix("overridden", handler, exempt=self._current_handler_for(key) is handler)
         self._check_no_removed_fields(handler)
         if kind == "view":
             if name is None:

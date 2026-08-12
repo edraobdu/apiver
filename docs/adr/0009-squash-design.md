@@ -124,3 +124,37 @@ something other than real per-endpoint `override()` calls (e.g. a shared mixin o
 injects), squash — like everything else in this ADR — only ever reasons about what `register()`/
 `override()`/`remove()` actually declared, so it would need revisiting then. Nothing here narrows that
 future ticket's options.
+
+**Amendment (PR #83 review): items 4–5 corrected — squash keeps the target's parent chain intact; it
+never makes the target a new Base Version.** As originally written, item 4 had squash strip the target's
+`.derive()` line and re-emit every key as `register()`, becoming a fresh, parentless Base Version. That's
+wrong: it silently discarded the parent link a developer never asked to discard, and — caught by the CLI
+round-trip test that reimports the freshly-written file in a fresh process — it isn't even the version
+`apiver remove` (item 5) needs squash to produce, since *that* command is what's supposed to be the one
+cutting the parent link, not squash.
+
+- **The parent-derivation line is preserved as-is** (`{target} = {parent}.derive({target!r})`), and every
+  key already resolvable through `target.parent` (`parent._resolved_keys()`) is re-declared with
+  `override()`, never `register()` — the parent still resolves it, and `register()` raises on a key that
+  already exists. Only a key `target` genuinely introduces itself, with no ancestor ever having had it,
+  uses `register()`. A key the parent still resolves but `target.resolution_table` doesn't (something in
+  the chain removed it) needs an explicit `remove()` re-declared too — full regeneration otherwise drops
+  the original `.remove()` call silently, resurrecting the parent's route in the freshly-written file.
+- **This surfaced a real conflict with `_check_suffix`** (`version.py`, ADR 0003 item 2): `override()`
+  refuses a handler whose class name doesn't carry the *overriding* version's own suffix, and a squash-
+  flattened key's handler was authored for whichever version originally introduced it, not the target —
+  `RefundViewSetV2` re-declared via `v3.override(...)` doesn't carry `v3`'s suffix. Resolved with a
+  narrow, targeted exemption on `override()` (`Version._current_handler_for`): the check is skipped only
+  when the handler passed is the *exact same object* already resolving at that key. This is safe because
+  the collision `_check_suffix` exists to catch — a genuinely new or different class silently colliding
+  under a reused name — can't happen here: that object was already part of the target's own composed
+  schema, under that exact name, before the call (drf-spectacular's schema generation is already scoped
+  to each version's own mounted patterns, so there's no cross-version leakage to worry about either). A
+  genuinely different, non-suffixed handler still raises, unchanged.
+- **Item 5's "once nothing imports them, they're inert, safe to delete" is wrong** for the same reason —
+  the absorbed versions are still imported, still live, still exactly as load-bearing as before squash
+  ran. Squash's own CLI output no longer implies otherwise; deleting anything is entirely `apiver remove`'s
+  job, once it exists, not something a developer should be nudged to do by hand in the meantime.
+- **Item 7 stands, more precisely true than originally reasoned**: downstream versions need no changes
+  specifically *because* the parent chain is untouched — there was never a chain-restructuring step for
+  them to be affected by in the first place.

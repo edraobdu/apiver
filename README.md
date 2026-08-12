@@ -424,16 +424,20 @@ declarations — it never touches a View or Serializer's source, so there's no c
 ```console
 $ apiver squash v3
 wrote .../apiversions/v3/registry.py
-apiver: v1, v2 are no longer referenced by 'v3' — safe to delete by hand once you're satisfied with the
-result (squash never deletes anything itself).
+apiver: 'v3's registry.py now explicitly overrides every route it inherited from v1, v2 — its parent
+chain is unchanged, so nothing is safe to remove yet. `apiver remove` (not yet built) is what will cut
+the parent link and delete their directories.
 ```
 
 `apiver squash v3` walks `v3`'s *whole* ancestor chain (however deep — not just its immediate parent) and
-rewrites `v3/registry.py` from scratch: every route it resolves becomes an explicit `register()` call,
-`v3` itself becomes a new Base Version (no parent, nothing to inherit), and `override()`/`remove()` calls
-against a chain that no longer exists disappear because there's nothing left for them to mean. It's
-auto-applied — there's no `--apply` flag or staged output to promote — because the change is small enough
-that `git diff` is a complete review surface on its own.
+rewrites `v3/registry.py` from scratch: every route it resolves — including whatever it only ever
+inherited implicitly — becomes an explicit `override()` call (`register()` would raise: the parent chain
+still resolves that key, unchanged), and any route `v3` removed along the way is re-declared with an
+explicit `remove()` too, so nothing about what `v3` actually serves changes. **`v3`'s parent link itself
+is left exactly as it was** — squash makes a version's own file a complete, honest description of what it
+serves, without restructuring the chain underneath it. It's auto-applied — there's no `--apply` flag or
+staged output to promote — because the change is small enough that `git diff` is a complete review
+surface on its own.
 
 Before it writes anything, squash re-checks every absorbed version against the registry-only rule from
 [Philosophy](#philosophy) and refuses, listing every violation at once, if any of them fail it:
@@ -445,12 +449,13 @@ apiver: squash refuses to run — every absorbed version must satisfy ADR 0003's
 - version 'v1's apiversions/v1/registry.py defines ['InlineWidgetView'] inline — ...
 ```
 
-**Squash never deletes anything.** `v1` and `v2` are left exactly where they are, on disk — nothing
-imports them anymore, so they're inert, but removing them, unmounting them from the Aggregation Root, and
-dropping them from `APIVER_VERSIONS` is a separate step you do by hand (`apiver remove` is planned, not
-yet built — see [Roadmap](#roadmap)). `APIVER_MAX_LIVE_VERSIONS` (default **3**) is the warning that
-tells you it's time to consider running squash in the first place; see
-[ADR 0009](docs/adr/0009-squash-design.md) for the full design.
+**Squash never deletes anything, and it never touches the parent chain.** `v1` and `v2` stay exactly
+where they are, still imported, still live — `v3`'s `registry.py` is just now explicit about everything
+it already serves. Actually cutting the chain (dropping `v3`'s parent link, converting these `override()`
+calls to `register()`, deleting `v1`/`v2`, unmounting them from the Aggregation Root and
+`APIVER_VERSIONS`) is `apiver remove`'s job — planned, not yet built (see [Roadmap](#roadmap)).
+`APIVER_MAX_LIVE_VERSIONS` (default **3**) is the warning that tells you it's time to start thinking about
+that; see [ADR 0009](docs/adr/0009-squash-design.md) for the full design.
 
 ## Version-aware links: apiver.drf.reverse
 
@@ -538,7 +543,7 @@ then `DJANGO_SETTINGS_MODULE`, then `[tool.apiver].django_settings_module` in `p
 | `apiver versions` | Prints lineage, frozen status, lifecycle state, alias pointers, and defined-vs-inherited routes per version — reading only the manifest, without booting the project. |
 | `apiver diff OLD NEW [--json]` | Compares two versions' composed OpenAPI schemas, plus each shared registration's `permission_classes`/`authentication_classes`/`pagination_class`/`filter_backends`/`throttle_classes`/`ordering`, and reports every field/resource/attribute change between them — human-readable by default, `--json` for tooling. Always prints the schema-diff blind-spots disclaimer alongside the result. |
 | `apiver check [VERSION ...]` | CI-facing wrapper around `diff`: prints every authored live version's diff against its parent (or just the versions named). Every reported change already came from an explicit `register()`/`override()`/`remove()` call, so `check` reports rather than gates — it exits non-zero only on a tool/config error, never because a diff found changes. |
-| `apiver squash VERSION` | Flattens `VERSION`'s whole ancestor chain into its own standalone, parentless `registry.py` — see [Squashing a long delta chain](#squashing-a-long-delta-chain). Refuses, writing nothing, if any absorbed version doesn't satisfy the registry-only rule from [Philosophy](#philosophy). Auto-applied to `VERSION`'s `registry.py`; never deletes anything. |
+| `apiver squash VERSION` | Makes `VERSION`'s `registry.py` an explicit, complete list of every route it resolves from its whole ancestor chain — see [Squashing a long delta chain](#squashing-a-long-delta-chain). Its parent chain is left untouched. Refuses, writing nothing, if any absorbed version doesn't satisfy the registry-only rule from [Philosophy](#philosophy). Auto-applied to `VERSION`'s `registry.py`; never deletes anything. |
 
 ## Settings
 

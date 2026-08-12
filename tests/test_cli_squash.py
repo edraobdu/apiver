@@ -42,8 +42,8 @@ def test_squash_writes_the_flattened_registry():
     assert result.returncode == 0, result.stderr
     assert f"wrote {V3_REGISTRY}" in result.stdout
     source = V3_REGISTRY.read_text()
-    assert "v3 = Version('v3')" in source
-    assert ".derive(" not in source
+    assert "v3 = v2.derive('v3')" in source
+    assert ".register(" not in source  # every absorbed key is override() — v2 still resolves them all
 
 
 def test_squash_reports_the_absorbed_versions():
@@ -51,15 +51,18 @@ def test_squash_reports_the_absorbed_versions():
 
     assert result.returncode == 0, result.stderr
     assert "v1, v2" in result.stdout
-    assert "never deletes anything" in result.stdout
+    assert "apiver remove" in result.stdout
+    assert "safe to remove yet" in result.stdout
 
 
 def test_squashed_registry_is_valid_python_that_reimports_cleanly():
     """The whole point: the file squash just wrote must actually work —
     reimport it in a fresh process and check its resolved routes match what
     the pre-squash chain already resolved (payments/refunds/schema/docs,
-    ping gone) and that it no longer derives from anything, not just that
-    squash *said* it wrote something."""
+    ping gone) and that its parent chain is unchanged, not just that squash
+    *said* it wrote something. This is the exact check that caught two real
+    bugs during review: register() vs override() (ImportError-on-reimport)
+    and a dropped remove() call (ping silently resurrected)."""
     result = _run("squash", "v3")
     assert result.returncode == 0, result.stderr
 
@@ -72,7 +75,7 @@ def test_squashed_registry_is_valid_python_that_reimports_cleanly():
             "django.setup(); "
             "from tests.fixtures_squash.api.v3.registry import v3; "
             "print(sorted(v3.resolution_table.keys())); "
-            "print(v3.parent)",
+            "print(v3.parent.name if v3.parent else None)",
         ],
         cwd=str(REPO_ROOT),
         env={**os.environ, "PYTHONPATH": os.pathsep.join([str(REPO_ROOT / "src"), str(REPO_ROOT)])},
@@ -85,7 +88,7 @@ def test_squashed_registry_is_valid_python_that_reimports_cleanly():
     assert "payments" in routes_line
     assert "refunds" in routes_line
     assert "ping" not in routes_line
-    assert parent_line.strip() == "None"
+    assert parent_line.strip() == "v2"
 
 
 def test_squash_refuses_a_version_with_no_parent():

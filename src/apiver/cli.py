@@ -215,9 +215,10 @@ def _cmd_squash(*, version: str) -> int:
     print(f"wrote {result.registry_path}")
     if result.absorbed:
         print(
-            f"apiver: {', '.join(result.absorbed)} are no longer referenced by {result.target!r} — "
-            "safe to delete by hand once you're satisfied with the result (squash never deletes "
-            "anything itself)."
+            f"apiver: {result.target!r}'s registry.py now explicitly overrides every route it "
+            f"inherited from {', '.join(result.absorbed)} — its parent chain is unchanged, so nothing "
+            "is safe to remove yet. `apiver remove` (not yet built) is what will cut the parent link "
+            "and delete their directories."
         )
     return 0
 
@@ -353,15 +354,16 @@ def main(argv: list[str] | None = None) -> int:
 
     squash_parser = subparsers.add_parser(
         "squash",
-        help="Flatten a version's whole ancestor chain into its own standalone, parentless registry.py "
-        "(ticket #77, ADR 0009). Refuses if any absorbed version still has implementation code in its "
-        "own root (ADR 0003's ticket #77 amendment) — auto-applied to the target's registry.py, but "
-        "never deletes anything.",
+        help="Make a version's registry.py an explicit, complete list of every route it resolves "
+        "(ticket #77, ADR 0009) — every implicitly-inherited route becomes a real override() call; its "
+        "parent chain is left untouched. Refuses if any absorbed version still has implementation code "
+        "in its own root (ADR 0003's ticket #77 amendment) — auto-applied to the target's registry.py, "
+        "but never deletes anything.",
     )
     squash_parser.add_argument(
         "version",
-        help="The version to flatten into (e.g. v3) — absorbs its whole ancestor chain, leaving it "
-        "with no parent.",
+        help="The version to flatten (e.g. v3) — every route inherited from its whole ancestor chain "
+        "becomes an explicit override() call on it.",
     )
 
     versions_parser = subparsers.add_parser(
