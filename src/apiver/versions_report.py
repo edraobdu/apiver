@@ -1,6 +1,9 @@
 """`apiver versions` (ticket 17): a human-readable summary of the committed
 manifest — lineage, frozen status, lifecycle state, alias pointers, and each
-version's own routes versus what it inherits (spec items 64-66).
+version's own routes versus what it inherits (spec items 64-66). Versions
+are listed in chronological order per the manifest's configured Scheme, and
+a version's Display Name is shown alongside its Slug when the two differ
+(ticket #66, ADR 0008 item 7).
 
 Reads only the already-written `apiver.toml`, never live Version objects —
 introspection stays fast and usable in scripts, with no
@@ -19,8 +22,11 @@ also imports from here) stays stdlib-only so it stays importable without it.
 
 import tomllib
 from datetime import UTC, datetime
+from functools import cmp_to_key
 from pathlib import Path
 from typing import Any
+
+from .schemes import DEFAULT_SCHEME_NAME, UnknownSchemeError, get_scheme
 
 MANIFEST_FILENAME = "apiver.toml"
 
@@ -57,17 +63,31 @@ def format_versions_report(manifest: dict[str, Any], *, now: datetime | None = N
     if not versions:
         return "No versions in the manifest.\n"
 
+    # Chronological order, not declaration order (ticket #66, ADR 0008 item
+    # 2) — a manifest predating this ticket (or hand-edited into an
+    # unrecognized scheme) falls back to `sequential` rather than failing a
+    # read-only report command over it (versions_report.py's own
+    # "best-effort read of the last committed snapshot" posture above).
+    try:
+        scheme = get_scheme(manifest.get("scheme", DEFAULT_SCHEME_NAME))
+    except UnknownSchemeError:
+        scheme = get_scheme(DEFAULT_SCHEME_NAME)
+    ordered_names = sorted(versions, key=cmp_to_key(scheme.compare))
+
     aliases_by_target: dict[str, list[str]] = {}
     for alias_name, target in aliases.items():
         aliases_by_target.setdefault(target, []).append(alias_name)
 
     lines: list[str] = []
-    for name, entry in versions.items():
+    for name in ordered_names:
+        entry = versions[name]
         parent = entry.get("parent")
         role = "base version" if parent is None else f"derived from {parent}"
         frozen = "frozen" if entry.get("frozen") else "mutable"
         state = _lifecycle_state(entry, now=now)
-        lines.append(f"{name} ({role}) — {frozen}, {state}")
+        display_name = entry.get("display_name", name)
+        label = name if display_name == name else f"{name} [{display_name}]"
+        lines.append(f"{label} ({role}) — {frozen}, {state}")
 
         pointers = sorted(aliases_by_target.get(name, []))
         if pointers:

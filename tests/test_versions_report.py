@@ -115,3 +115,102 @@ def test_now_defaults_to_the_wall_clock_when_not_given():
     report = format_versions_report(manifest)
 
     assert "live" in report
+
+
+# --- ticket #66, ADR 0008: chronological sort + Display Name ---
+
+
+def test_a_missing_display_name_falls_back_to_the_slug_unchanged():
+    # Zero-migration guarantee (ADR 0008 Consequences): a manifest written
+    # before this ticket has no display_name field at all.
+    manifest = _manifest(v1={"frozen": True, "deprecated": False, "routes": {}})
+
+    report = format_versions_report(manifest, now=NOW)
+
+    assert "v1 (base version) — frozen, live" in report
+
+
+def test_a_display_name_equal_to_the_slug_leaves_the_report_line_unchanged():
+    # The sequential scheme's format() is the identity function — no bracket
+    # noise for the common case (ADR 0008 Consequences' zero-migration
+    # guarantee for `apiver versions`' own output).
+    manifest = _manifest(v1={"frozen": True, "deprecated": False, "display_name": "v1", "routes": {}})
+
+    report = format_versions_report(manifest, now=NOW)
+
+    assert "v1 (base version) — frozen, live" in report
+    assert "[" not in report
+
+
+def test_a_display_name_that_differs_from_the_slug_is_shown_alongside_it():
+    manifest = {
+        "scheme": "semver",
+        "versions": {
+            "v1_2_3": {
+                "frozen": True,
+                "deprecated": False,
+                "display_name": "v1.2.3",
+                "routes": {},
+            }
+        },
+        "aliases": {},
+    }
+
+    report = format_versions_report(manifest, now=NOW)
+
+    assert "v1_2_3 [v1.2.3] (base version) — frozen, live" in report
+
+
+def test_versions_are_sorted_chronologically_by_the_manifests_scheme_not_declaration_order():
+    manifest = {
+        "scheme": "sequential",
+        "versions": {
+            # Declared out of order on purpose — v10 sorts numerically after
+            # v2 under the sequential scheme, not lexically before it.
+            "v10": {"frozen": False, "deprecated": False, "display_name": "v10", "routes": {}},
+            "v2": {"frozen": False, "deprecated": False, "display_name": "v2", "routes": {}},
+            "v1": {"frozen": True, "deprecated": False, "display_name": "v1", "routes": {}},
+        },
+        "aliases": {},
+    }
+
+    report = format_versions_report(manifest, now=NOW)
+
+    assert report.index("v1 (") < report.index("v2 (") < report.index("v10 (")
+
+
+def test_an_unrecognized_manifest_scheme_falls_back_to_sequential_ordering():
+    manifest = {
+        "scheme": "bogus",
+        "versions": {
+            "v2": {"frozen": False, "deprecated": False, "display_name": "v2", "routes": {}},
+            "v1": {"frozen": True, "deprecated": False, "display_name": "v1", "routes": {}},
+        },
+        "aliases": {},
+    }
+
+    report = format_versions_report(manifest, now=NOW)
+
+    assert report.index("v1 (") < report.index("v2 (")
+
+
+def test_a_label_suffixed_version_sorts_alongside_its_base_point():
+    manifest = {
+        "scheme": "sequential",
+        "versions": {
+            "v2": {"frozen": False, "deprecated": False, "display_name": "v2", "routes": {}},
+            "v1_testing": {
+                "frozen": False,
+                "deprecated": False,
+                "display_name": "v1-testing",
+                "parent": "v1",
+                "routes": {},
+            },
+            "v1": {"frozen": True, "deprecated": False, "display_name": "v1", "routes": {}},
+        },
+        "aliases": {},
+    }
+
+    report = format_versions_report(manifest, now=NOW)
+
+    assert report.index("v1 (") < report.index("v1_testing") < report.index("v2 (")

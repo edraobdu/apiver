@@ -37,6 +37,7 @@ from pathlib import Path
 from django.conf import settings
 from django.core.checks import Error, Warning, register
 
+from ..schemes import DEFAULT_SCHEME_NAME, SCHEME_NAMES
 from .manifest import ManifestError, _load_aliases, _load_versions, manifest_diff
 
 AUTHORED_REQUIRED_FILES = ("serializers.py", "views.py", "registry.py")
@@ -234,5 +235,30 @@ def check_max_live_versions(app_configs=None, **kwargs) -> list[Error | Warning]
             f"exceeding APIVER_MAX_LIVE_VERSIONS={max_live}. Consider `apiver squash` or "
             "rebasing onto a fresh base version (ADR 0004 item 8).",
             id="apiver.W002",
+        )
+    ]
+
+
+@register()
+def check_version_scheme(app_configs=None, **kwargs) -> list[Error]:
+    """Validates `APIVER_VERSION_SCHEME` names one of apiver's three
+    built-in Schemes (ticket #66, ADR 0008 item 3) — the same
+    settings-validation idiom `check_version_layout` already applies to
+    `APIVER_ROOT_DIR`/`APIVER_BASE_VERSION`. A misspelled value fails loud
+    here rather than surfacing later as a confusing slug-formatting or
+    sort-order bug in `apiver manifest`/`apiver versions`.
+
+    Unset is not an error: it defaults to `sequential` (ADR 0008
+    Consequences' zero-migration guarantee), one of the very values this
+    check accepts.
+    """
+    scheme_name = getattr(settings, "APIVER_VERSION_SCHEME", DEFAULT_SCHEME_NAME)
+    if scheme_name in SCHEME_NAMES:
+        return []
+    return [
+        Error(
+            f"APIVER_VERSION_SCHEME={scheme_name!r} is not a recognized value — expected one of "
+            f"{', '.join(sorted(SCHEME_NAMES))} (ADR 0008 item 3).",
+            id="apiver.E009",
         )
     ]

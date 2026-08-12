@@ -3,6 +3,7 @@ from .checks import (
     check_manifest_freshness,
     check_max_live_versions,
     check_version_layout,
+    check_version_scheme,
 )
 from .init import InitError
 from .manifest import ManifestError, build_manifest
@@ -23,5 +24,6 @@ __all__ = [
     "check_manifest_freshness",
     "check_max_live_versions",
     "check_version_layout",
+    "check_version_scheme",
     "reverse",
 ]
