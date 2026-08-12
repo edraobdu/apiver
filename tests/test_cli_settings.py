@@ -29,7 +29,7 @@ API_DIR = FIXTURE_ROOT / "api"
 AGGREGATION_ROOT = API_DIR / "urls.py"
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 
-_FIXTURE_ENTRIES = {"v0", "v1", "notaversion", "__init__.py", "__pycache__"}
+_FIXTURE_ENTRIES = {"v0", "v1", "v1_0_0", "d2026_01_01", "notaversion", "__init__.py", "__pycache__"}
 
 
 def _run(
