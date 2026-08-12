@@ -41,6 +41,7 @@ __all__ = [
     "ManifestError",
     "build_manifest",
     "load_committed_manifest",
+    "load_version",
     "manifest_diff",
     "manifest_path",
 ]
@@ -72,24 +73,36 @@ def _load_versions() -> dict[str, Version]:
             "manifest for. Set APIVER_VERSIONS = ['v1', 'v2', ...] in settings."
         )
 
+    root_dir = _require_root_dir()
+    return {name: load_version(name, root_dir=root_dir) for name in names}
+
+
+def _require_root_dir() -> str:
     root_dir: str | None = getattr(settings, "APIVER_ROOT_DIR", None)
     if not root_dir:
         raise ManifestError(
-            "apiver needs APIVER_ROOT_DIR set to derive each APIVER_VERSIONS name's dotted path "
+            "apiver needs APIVER_ROOT_DIR set to derive a live Version's dotted path "
             "as f'{APIVER_ROOT_DIR}.{name}.registry.{name}' — without it, there is no live "
             "Version object to read (ADR 0007 items 3, 5)."
         )
+    return root_dir
 
-    versions: dict[str, Version] = {}
-    for name in names:
-        dotted_path = f"{root_dir}.{name}.registry.{name}"
-        obj = _import_object(dotted_path)
-        if not isinstance(obj, Version):
-            raise ManifestError(
-                f"{dotted_path!r} (derived from APIVER_VERSIONS[{name!r}]) is not a Version instance."
-            )
-        versions[name] = obj
-    return versions
+
+def load_version(name: str, *, root_dir: str | None = None) -> Version:
+    """Resolve a single live version by name to its `Version` instance —
+    the same derivation `_load_versions` uses per `APIVER_VERSIONS` entry,
+    exposed standalone for callers (e.g. `apiver diff`/`apiver check`,
+    ticket #76) that need an arbitrary named version rather than every
+    configured one."""
+    if root_dir is None:
+        root_dir = _require_root_dir()
+    dotted_path = f"{root_dir}.{name}.registry.{name}"
+    obj = _import_object(dotted_path)
+    if not isinstance(obj, Version):
+        raise ManifestError(
+            f"{dotted_path!r} (derived from version name {name!r}) is not a Version instance."
+        )
+    return obj
 
 
 def _load_aliases() -> dict[str, Alias]:

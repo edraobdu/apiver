@@ -2,7 +2,7 @@
 
 A standalone script, not a `manage.py` subcommand, so offline tooling can
 introspect a project without importing the whole thing (spec item 66).
-`manifest`, `init`, `mount`, and `alias` still need
+`manifest`, `init`, `mount`, `alias`, `diff`, and `check` still need
 `DJANGO_SETTINGS_MODULE` resolved, exactly as any other Django-adjacent CLI
 (celery, gunicorn) requires, since they build from live `Version`/`Alias`
 objects that only exist once Django settings are configured. Ticket #54
@@ -140,6 +140,75 @@ def _cmd_manifest(*, check: bool, path: str | None) -> int:
     return 0
 
 
+def _cmd_diff(*, old_version: str, new_version: str, as_json: bool) -> int:
+    import json
+
+    from .drf.manifest import ManifestError, load_version
+    from .drf.schema_diff import BLIND_SPOTS_NOTE, DiffError, diff_versions, format_diff_text
+    from .schemes import get_scheme
+
+    scheme_name = getattr(_django_settings(), "APIVER_VERSION_SCHEME", "sequential")
+    try:
+        scheme = get_scheme(scheme_name)
+        old = load_version(old_version)
+        new = load_version(new_version)
+        diff = diff_versions(old, new, scheme=scheme)
+    except (ManifestError, DiffError) as exc:
+        print(f"apiver: {exc}", file=sys.stderr)
+        return 1
+
+    if as_json:
+        from .drf.schema_diff import to_jsonable
+
+        print(json.dumps(to_jsonable(diff), indent=2))
+        print(BLIND_SPOTS_NOTE, file=sys.stderr)
+        return 0
+
+    print(format_diff_text(diff, old_name=old_version, new_name=new_version), end="")
+    print(BLIND_SPOTS_NOTE)
+    return 0
+
+
+def _cmd_check(*, versions: list[str]) -> int:
+    from .drf.manifest import ManifestError, load_version
+    from .drf.schema_diff import BLIND_SPOTS_NOTE, DiffError, diff_versions, format_diff_text
+    from .schemes import get_scheme
+
+    django_settings = _django_settings()
+    scheme_name = getattr(django_settings, "APIVER_VERSION_SCHEME", "sequential")
+
+    try:
+        scheme = get_scheme(scheme_name)
+        names = versions or list(getattr(django_settings, "APIVER_VERSIONS", []))
+        targets = [load_version(name) for name in names]
+    except ManifestError as exc:
+        print(f"apiver: {exc}", file=sys.stderr)
+        return 1
+
+    authored = [version for version in targets if version.parent is not None]
+    if not authored:
+        print("apiver: no authored versions (with a parent) to check.")
+        return 0
+
+    for version in authored:
+        try:
+            diff = diff_versions(version.parent, version, scheme=scheme)
+        except DiffError as exc:
+            print(f"apiver: {exc}", file=sys.stderr)
+            return 1
+
+        print(format_diff_text(diff, old_name=version.parent.name, new_name=version.name), end="")
+
+    print(BLIND_SPOTS_NOTE)
+    return 0
+
+
+def _django_settings():
+    from django.conf import settings
+
+    return settings
+
+
 def _cmd_versions(*, path: str | None) -> int:
     resolved = Path(path) if path is not None else Path.cwd() / MANIFEST_FILENAME
     manifest = load_committed_manifest(resolved)
@@ -234,6 +303,35 @@ def main(argv: list[str] | None = None) -> int:
         help="The version to point the alias at (e.g. v2) — must already be mounted in the Aggregation Root.",
     )
 
+    diff_parser = subparsers.add_parser(
+        "diff",
+        help="Compare two versions' composed OpenAPI schemas and report field/resource changes "
+        "(ticket #76). Cannot see SerializerMethodField output, permissions, pagination, or error "
+        "shape changes — printed every run as a fixed disclaimer, never silently skipped.",
+    )
+    diff_parser.add_argument("old_version", metavar="OLD", help="The version to diff from (e.g. v1).")
+    diff_parser.add_argument("new_version", metavar="NEW", help="The version to diff to (e.g. v2).")
+    diff_parser.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit the structured diff as JSON on stdout instead of a human-readable summary.",
+    )
+
+    check_parser = subparsers.add_parser(
+        "check",
+        help="CI-facing wrapper around `diff`: prints every authored live version's schema diff "
+        "against its parent. Every schema-visible change came from an explicit register()/"
+        "override()/remove() call, so this reports rather than gates — exits non-zero only on a "
+        "tool/config error, never because a diff found changes.",
+    )
+    check_parser.add_argument(
+        "versions",
+        nargs="*",
+        metavar="VERSION",
+        help="Versions to check (default: every version in APIVER_VERSIONS).",
+    )
+
     versions_parser = subparsers.add_parser(
         "versions",
         help="Print lineage, frozen status, lifecycle state, alias pointers and route composition "
@@ -278,6 +376,10 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_mount(version_name=args.version, from_version=args.from_version)
     if args.command == "alias":
         return _cmd_alias(name=args.name, from_version=args.from_version)
+    if args.command == "diff":
+        return _cmd_diff(old_version=args.old_version, new_version=args.new_version, as_json=args.as_json)
+    if args.command == "check":
+        return _cmd_check(versions=args.versions)
 
     parser.error(f"unknown command {args.command!r}")
     return 2
