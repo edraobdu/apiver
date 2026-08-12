@@ -84,8 +84,10 @@ surfaces that reads `Version.name` directly (e.g. a hand-written template) sees 
 Name formatting is not automatically threaded through every possible integration point, only the three
 named in item 7.
 
-Left to the build ticket: whether hand-authored `Version("v1_2_3")` construction in a hand-edited
-`registry.py` (bypassing `apiver mount`'s CLI-time validation entirely) should also be checked — e.g. via
-a Django system check mirroring the directory-shape check's existing idiom (ADR 0003 item 2) — or whether
-CLI-time validation alone is judged sufficient since `mount` is the only supported way to create an
-authored version's scaffold.
+**Resolved by ticket #72**: no dedicated system check was built for hand-authored `Version("v1_2_3")`
+construction bypassing `apiver mount`'s CLI-time validation. `check_manifest_freshness`
+(`apiver.drf.checks`) already builds the manifest on every `manage.py check`, and `build_manifest`
+already calls `Scheme.format()` on every configured version's Slug (`manifest.py:_version_entry`) —
+a non-conforming hand-authored Slug already fails that call, surfacing as a loud `apiver.E004` Error,
+not the check's usual `apiver.W001` staleness Warning. A sibling check mirroring the directory-shape
+check's idiom (ADR 0003 item 2) would duplicate that validation rather than add coverage.
