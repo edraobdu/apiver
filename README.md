@@ -362,6 +362,12 @@ with no `serializer_class` routes correctly under every version and does appear 
 gap apiver is hiding; it's a property of drf-spectacular's own introspection, and apiver doesn't try to
 paper over it with guesswork.
 
+The same honesty extends to the **No** rows in the table above — `SerializerMethodField` output,
+permissions/authentication, pagination/filtering/ordering/throttling, error response shape. They're
+real, supported changes; a schema diff can't see them by construction, not a gap apiver is hiding.
+Whether (and how) `apiver check` can flag them anyway instead of just disclaiming them is tracked in
+[#79](https://github.com/edraobdu/apiver/issues/79).
+
 ## Lifecycle: deprecation and sunset
 
 A version's lifecycle lives on the `Version` object itself — never in settings, never only in the
