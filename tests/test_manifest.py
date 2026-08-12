@@ -58,9 +58,10 @@ def test_build_manifest_records_the_explicitly_configured_scheme():
 @override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["v1", "v2"], APIVER_VERSION_SCHEME="semver")
 def test_build_manifest_raises_when_a_version_name_does_not_conform_to_the_configured_scheme():
     # v1/v2 are sequential-shaped names — semver's base grammar (v1_2_3) does
-    # not match them (ticket #66, ADR 0008 Consequences: whether hand-authored
-    # non-conforming names are caught is left to this build ticket for the
-    # manifest-build path, since CLI-time validation isn't wired yet).
+    # not match them. This is also how ticket #72 resolved: a hand-authored,
+    # scheme-nonconforming Version bypassing `apiver mount`'s CLI-time
+    # validation is still caught here, and so by check_manifest_freshness
+    # below, without a dedicated system check.
     with pytest.raises(ManifestError):
         build_manifest()
 
@@ -214,6 +215,25 @@ def test_check_manifest_freshness_reports_a_configuration_error_loudly(tmp_path)
     assert len(messages) == 1
     assert isinstance(messages[0], Error)
     assert messages[0].id == "apiver.E004"
+
+
+def test_check_manifest_freshness_reports_a_scheme_nonconforming_version_loudly(tmp_path):
+    # ticket #72: a hand-edited registry.py can construct a Version whose
+    # Slug bypasses `apiver mount`'s CLI-time scheme validation entirely.
+    # check_manifest_freshness still catches it, via build_manifest's own
+    # Scheme.format() call, so no dedicated system check was built for this.
+    with override_settings(
+        APIVER_ROOT_DIR=ROOT_DIR,
+        APIVER_VERSIONS=["v1", "v2"],
+        APIVER_VERSION_SCHEME="semver",
+        APIVER_MANIFEST_PATH=str(tmp_path / "apiver.toml"),
+    ):
+        messages = check_manifest_freshness()
+
+    assert len(messages) == 1
+    assert isinstance(messages[0], Error)
+    assert messages[0].id == "apiver.E004"
+    assert "does not conform" in messages[0].msg
 
 
 def test_the_freshness_check_is_registered_with_djangos_check_framework():
