@@ -161,6 +161,19 @@ v1 = Version("v1")
 v1.register("products", ProductViewSet, basename="products")
 ```
 
+Mount it — this is ordinary Django, no namespace to hand-write:
+
+```python
+# api/urls.py — the Aggregation Root
+from django.urls import include, path
+
+from api.v1.registry import v1
+
+urlpatterns = [
+    path("api/v1/", include(v1.urls)),
+]
+```
+
 Now say V2 needs to stop making clients divide by 100 in their own code — `price_cents` (an int) becomes
 `price` (a decimal string). This is the change-shape that comes up constantly in real API versioning:
 not a new field, an existing one reshaped out from under the clients still calling V1. The override
@@ -203,19 +216,19 @@ v2 = v1.derive("v2")
 v2.override("products", ProductViewSetV2, basename="products")
 ```
 
-Mount both — this is ordinary Django, no namespace to hand-write:
+Mount it — same Aggregation Root as before, one added `include()`, nothing else in it changes:
 
-```python
-# api/urls.py — the Aggregation Root
-from django.urls import include, path
+```diff
+ # api/urls.py — the Aggregation Root
+ from django.urls import include, path
 
-from api.v1.registry import v1
-from api.v2.registry import v2
+ from api.v1.registry import v1
++from api.v2.registry import v2
 
-urlpatterns = [
-    path("api/v1/", include(v1.urls)),
-    path("api/v2/", include(v2.urls)),
-]
+ urlpatterns = [
+     path("api/v1/", include(v1.urls)),
++    path("api/v2/", include(v2.urls)),
+ ]
 ```
 
 That's the whole change. `GET /api/v2/products/` now returns `price: "19.99"`; `GET /api/v1/products/`
