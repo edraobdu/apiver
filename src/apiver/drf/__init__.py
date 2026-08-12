@@ -7,6 +7,7 @@ from .checks import (
 )
 from .init import InitError
 from .manifest import ManifestError, build_manifest
+from .remove import RemoveError, RemoveResult, remove_version
 from .reverse import reverse
 from .squash import SquashError, SquashResult, squash_version
 from .version import Alias, CompositionError, Registration, Route, RouteIdentity, Version
@@ -17,6 +18,8 @@ __all__ = [
     "InitError",
     "ManifestError",
     "Registration",
+    "RemoveError",
+    "RemoveResult",
     "Route",
     "RouteIdentity",
     "SquashError",
@@ -28,6 +31,7 @@ __all__ = [
     "check_max_live_versions",
     "check_version_layout",
     "check_version_scheme",
+    "remove_version",
     "reverse",
     "squash_version",
 ]

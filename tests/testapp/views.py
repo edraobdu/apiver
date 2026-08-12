@@ -69,6 +69,36 @@ class PaymentViewSetV3(viewsets.ViewSet):
         return Response({"id": pk, "version": "v3"})
 
 
+class PaymentViewSetV11(viewsets.ViewSet):
+    """Used only by tests/fixtures_remove/api/v11 — one of two direct
+    children `apiver remove v10` re-parents into its own Base Version."""
+
+    serializer_class = PaymentSerializer
+
+    def retrieve(self, request, pk=None):
+        return Response({"id": pk, "version": "v11"})
+
+
+class PaymentViewSetV12(viewsets.ViewSet):
+    """Used only by tests/fixtures_remove/api/v12 — the other of v10's two
+    direct children."""
+
+    serializer_class = PaymentSerializer
+
+    def retrieve(self, request, pk=None):
+        return Response({"id": pk, "version": "v12"})
+
+
+class PaymentViewSetV31(viewsets.ViewSet):
+    """Used only by tests/fixtures_remove/api/v31 — v30's already-squashed
+    child, exercised by `apiver remove`'s --force (never-deprecated) test."""
+
+    serializer_class = PaymentSerializer
+
+    def retrieve(self, request, pk=None):
+        return Response({"id": pk, "version": "v31"})
+
+
 class PaymentsSummaryView(APIView):
     def get(self, request):
         return Response({"summary": "ok"})
