@@ -174,8 +174,11 @@ def _render_registry(
 
         handler = registration.handler
         diagnostics: list[str] = []
+        handler_cls = getattr(handler, "cls", None)
         if isinstance(handler, type):
             resolved = _resolve_class_symbol(handler, handler, key, diagnostics)
+        elif handler_cls is not None:
+            resolved = _resolve_class_symbol(handler_cls, handler, key, diagnostics)
         else:
             resolved = _resolve_function_symbol(handler, key, diagnostics)
         if resolved is None:
