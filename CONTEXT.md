@@ -41,6 +41,31 @@ _Avoid_: channel, tag
 The set of overrides and removals one Version declares against its parent.
 _Avoid_: patch, diff (reserved for schema comparison), migration (reserved for `apiver init`)
 
+**Scheme**:
+The project-wide convention (`APIVER_VERSION_SCHEME`) that gives a Version's name shape: validates it,
+formats it into a Display Name, and orders it chronologically against other names in the same scheme. One
+of `sequential` (default), `semver`, or `date`. A Version's `name` is always its Scheme-conforming Slug,
+never the Display Name (ADR 0008).
+_Avoid_: version format, naming convention (too vague — Scheme is the specific, declared thing)
+
+**Slug**:
+A Version's actual `name` — the Python-identifier-safe string stored and used everywhere in code (module
+paths, class-name suffix, Django namespace). Distinct from its Display Name, which a Scheme derives from it
+for presentation only (ADR 0008).
+_Avoid_: version string, identifier (ambiguous with Route Identity)
+
+**Display Name**:
+The human-readable form a Scheme formats a Slug into for presentation — `v1_2_3` becomes `v1.2.3`. Surfaces
+only in CLI output, the Manifest, and literal URL path segments — never anywhere Python-identifier-
+constrained (ADR 0008).
+_Avoid_: version name (ambiguous with Slug, which is informally "the version's name" too)
+
+**Label**:
+An optional trailing component on a Slug (`v1_2_3_testing`) marking a branch/testing variant that is
+scheme-legal but not a chronological point — displays as `v1.2.3-testing`, sorts beside its base point
+rather than into the timeline (ADR 0008).
+_Avoid_: suffix (ambiguous with the class-name suffix check), tag (reserved informally for Alias)
+
 ### Routing
 
 **Route**:
