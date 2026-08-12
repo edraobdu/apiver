@@ -27,6 +27,7 @@ complete, working API surface without duplicating the 95% of it that didn't chan
 - [What's supported today](#whats-supported-today)
 - [The routing/schema boundary](#the-routingschema-boundary)
 - [Lifecycle: deprecation and sunset](#lifecycle-deprecation-and-sunset)
+- [Squashing a long delta chain](#squashing-a-long-delta-chain)
 - [Version-aware links: apiver.drf.reverse](#version-aware-links-apiverdrfreverse)
 - [Version schemes](#version-schemes)
 - [CLI at a glance](#cli-at-a-glance)
@@ -97,6 +98,13 @@ queryset gets built. apiver's job stops at the HTTP-facing shape of what crosses
 version. That boundary is permanent, not a placeholder for tooling that doesn't exist yet: apiver will
 never move, rename, or rewrite a file it didn't generate. `apiver init` discovers and imports your
 existing code from wherever it already lives — it does not, and will not, relocate it.
+
+**A version's own root is the one place apiver *does* draw a hard line.** `registry.py` may hold only
+imports, its `Version(...)`/`.derive()` line, and `register()`/`override()`/`remove()` calls — never a
+`class`/`def` of its own — and nothing else may sit in that same directory. This is what makes
+[`apiver squash`](#squashing-a-long-delta-chain) mechanical: a version can never be folded away and
+silently take code a later version still needs down with it, because implementation code was never in
+that directory to begin with. Enforced as an `apiver check` Error, not a suggestion.
 
 ## What you get
 
@@ -267,7 +275,7 @@ $ uv add apiver   # or your project's usual dependency manager
 ```
 
 Add `"apiver"` to `INSTALLED_APPS` — it has no models, but its system checks (layout, manifest
-freshness, live-version count) only register through `AppConfig.ready()` — and four settings:
+freshness, live-version count) only register through `AppConfig.ready()` — and three settings:
 
 ```diff
  # config/settings.py
@@ -280,18 +288,22 @@ freshness, live-version count) only register through `AppConfig.ready()` — and
      ...
  ]
 +
-+APIVER_ROOT_DIR = "api"  # dotted path to the package holding every version
 +APIVER_ROOT_PREFIX = "api/"  # absolute URL path every version mounts under
 +APIVER_BASE_VERSION = "v1"  # the name init adopts the existing API as
 +APIVER_VERSIONS = ["v1"]  # hand-maintained list of live version names
 ```
 
+There's a fourth setting, `APIVER_ROOT_DIR` — the dotted path to the package holding every version's own
+`registry.py` — but it's left out above deliberately: it defaults to `"apiversions"`, a name your project
+almost certainly isn't already using, precisely so it never collides with the `api/` app most projects
+already have. Only set it explicitly if you want apiver's own package to live somewhere else.
+
 Then:
 
 ```console
 $ apiver init
-wrote .../api/v1/registry.py
-wrote .../api/urls.py
+wrote .../apiversions/v1/registry.py
+wrote .../apiversions/urls.py
 wrote .../apiver.toml
 ```
 
@@ -402,6 +414,44 @@ $ apiver alias stable --from v2
 Re-pointing `stable` at a future `v3` is a one-line `target=` edit in the generated Aggregation Root;
 callers of `/api/stable/...` never have to change anything.
 
+## Squashing a long delta chain
+
+Long delta chains are the natural worry with a deltas-forward design — by `v12`, is the inheritance chain
+still maintainable? `apiver squash` is the answer, and it's mechanical rather than clever: because
+[a version's root can hold nothing but `registry.py`](#philosophy), squash only ever flattens routing
+declarations — it never touches a View or Serializer's source, so there's no codemod risk to review.
+
+```console
+$ apiver squash v3
+wrote .../apiversions/v3/registry.py
+apiver: v1, v2 are no longer referenced by 'v3' — safe to delete by hand once you're satisfied with the
+result (squash never deletes anything itself).
+```
+
+`apiver squash v3` walks `v3`'s *whole* ancestor chain (however deep — not just its immediate parent) and
+rewrites `v3/registry.py` from scratch: every route it resolves becomes an explicit `register()` call,
+`v3` itself becomes a new Base Version (no parent, nothing to inherit), and `override()`/`remove()` calls
+against a chain that no longer exists disappear because there's nothing left for them to mean. It's
+auto-applied — there's no `--apply` flag or staged output to promote — because the change is small enough
+that `git diff` is a complete review surface on its own.
+
+Before it writes anything, squash re-checks every absorbed version against the registry-only rule from
+[Philosophy](#philosophy) and refuses, listing every violation at once, if any of them fail it:
+
+```console
+$ apiver squash v3
+apiver: squash refuses to run — every absorbed version must satisfy ADR 0003's ticket #77 rule
+(registry.py only, no inline definitions) before it can be safely folded away:
+- version 'v1's apiversions/v1/registry.py defines ['InlineWidgetView'] inline — ...
+```
+
+**Squash never deletes anything.** `v1` and `v2` are left exactly where they are, on disk — nothing
+imports them anymore, so they're inert, but removing them, unmounting them from the Aggregation Root, and
+dropping them from `APIVER_VERSIONS` is a separate step you do by hand (`apiver remove` is planned, not
+yet built — see [Roadmap](#roadmap)). `APIVER_MAX_LIVE_VERSIONS` (default **3**) is the warning that
+tells you it's time to consider running squash in the first place; see
+[ADR 0009](docs/adr/0009-squash-design.md) for the full design.
+
 ## Version-aware links: apiver.drf.reverse
 
 Every version gets its own Django instance namespace, so an ordinary `reverse("products-detail")`
@@ -488,12 +538,13 @@ then `DJANGO_SETTINGS_MODULE`, then `[tool.apiver].django_settings_module` in `p
 | `apiver versions` | Prints lineage, frozen status, lifecycle state, alias pointers, and defined-vs-inherited routes per version — reading only the manifest, without booting the project. |
 | `apiver diff OLD NEW [--json]` | Compares two versions' composed OpenAPI schemas, plus each shared registration's `permission_classes`/`authentication_classes`/`pagination_class`/`filter_backends`/`throttle_classes`/`ordering`, and reports every field/resource/attribute change between them — human-readable by default, `--json` for tooling. Always prints the schema-diff blind-spots disclaimer alongside the result. |
 | `apiver check [VERSION ...]` | CI-facing wrapper around `diff`: prints every authored live version's diff against its parent (or just the versions named). Every reported change already came from an explicit `register()`/`override()`/`remove()` call, so `check` reports rather than gates — it exits non-zero only on a tool/config error, never because a diff found changes. |
+| `apiver squash VERSION` | Flattens `VERSION`'s whole ancestor chain into its own standalone, parentless `registry.py` — see [Squashing a long delta chain](#squashing-a-long-delta-chain). Refuses, writing nothing, if any absorbed version doesn't satisfy the registry-only rule from [Philosophy](#philosophy). Auto-applied to `VERSION`'s `registry.py`; never deletes anything. |
 
 ## Settings
 
 | Setting | Purpose |
 | --- | --- |
-| `APIVER_ROOT_DIR` | Dotted path to the package holding the Aggregation Root and every version's own package. |
+| `APIVER_ROOT_DIR` | Dotted path to the package holding the Aggregation Root and every version's own package. Defaults to `"apiversions"` — deliberately not `"api"`, so it never collides with a project's own pre-existing API app when adopting apiver into an existing project. |
 | `APIVER_ROOT_PREFIX` | Absolute URL path every version mounts under. |
 | `APIVER_BASE_VERSION` | The name `apiver init` adopts the existing API as. |
 | `APIVER_VERSIONS` | Hand-maintained list of live version names. |
@@ -539,16 +590,12 @@ after it:
   (`permission_classes`, authentication) that forwards to every route without an explicit `override()`
   per endpoint. Today's workaround — overriding each affected endpoint explicitly — stays the documented
   path unless this lands with a real mechanism behind it.
-- **[`apiver squash`](https://github.com/edraobdu/apiver/issues/77).** Long delta chains are the natural
-  worry with a deltas-forward design — by `v12`, is the inheritance chain still maintainable? `squash` is
-  the answer: flattening an authored version's inheritance chain into standalone source via an
-  LibCST-based codemod, so earlier versions can be safely deleted. This is genuinely novel codemod work,
-  named here with an honest caveat, not a promise: it generates output plus a per-registration
-  clean/needs-review report and stops short of auto-promoting anything — you review and `git mv` it in
-  yourself. **Today's workaround** is declaring a fresh base version and archiving the old chain, which
-  needs no new tooling at all. The `APIVER_MAX_LIVE_VERSIONS` warning exists specifically so the
-  "doesn't this get unwieldy" question has a real, live mechanism behind it before `squash` exists to
-  answer it structurally.
+- **`apiver remove`.** [`apiver squash`](#squashing-a-long-delta-chain) leaves the versions it absorbs on
+  disk, unreferenced but not deleted — deleting them, unmounting them from the Aggregation Root, and
+  dropping them from `APIVER_VERSIONS` is a distinct operation with its own blast radius, planned as its
+  own future ticket (not yet filed). **Today's workaround** needs no new tooling: `git rm -r` the absorbed
+  version's directory by hand once `squash` confirms nothing still references it, and drop it from
+  `APIVER_VERSIONS`/the Aggregation Root yourself.
 
 **apiver will never relocate your existing files** — see [Philosophy](#philosophy). `apiver init`
 discovers and imports code from wherever it already lives; that boundary doesn't move as the tool

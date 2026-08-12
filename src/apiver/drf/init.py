@@ -51,6 +51,7 @@ registry that silently serves the wrong routes (recommendation #5).
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass, field
 from importlib import import_module
 from pathlib import Path
@@ -63,6 +64,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, Spec
 from rest_framework.routers import APIRootView
 
 from ..schemes import DEFAULT_SCHEME_NAME, Scheme, UnknownSchemeError, get_scheme
+from .manifest import resolve_root_dir
 from .version import Version
 
 _FORMAT_SUFFIX_RE = re.compile(r"\(\?P<format>|drf_format_suffix")
@@ -734,12 +736,27 @@ def _ensure_root_dir_exists(root_dir: str) -> None:
     create it first. Without this, the very first `init` or `mount` run in a
     project that has never used apiver before fails on an unhelpful
     `ModuleNotFoundError` for a package the developer was never told to create.
+
+    Warns (non-fatal — the same advisory posture as the manifest-staleness and
+    max-live-versions checks) if the target directory already exists on disk at
+    this, its first-ever creation — a project's own pre-existing, unrelated
+    directory of the same name would otherwise collide silently (ADR 0003's
+    ticket #77 amendment, the reason `APIVER_ROOT_DIR` now defaults to
+    `"apiversions"` rather than the more collision-prone `"api"`).
     """
     try:
         import_module(root_dir)
         return
     except ImportError:
         pass
+    target_dir = Path.cwd().joinpath(*root_dir.split("."))
+    if target_dir.exists():
+        print(
+            f"apiver: {target_dir} already exists and doesn't look like it was created by apiver yet "
+            f"— if it collides with a pre-existing project directory, set APIVER_ROOT_DIR to a "
+            "different name before continuing (ADR 0003's ticket #77 amendment).",
+            file=sys.stderr,
+        )
     current = Path.cwd()
     for part in root_dir.split("."):
         current = current / part
@@ -950,12 +967,7 @@ def write_mount(version_name: str, *, from_version: str) -> tuple[Path, Path]:
     scheme = _configured_scheme()
     display_name = _validate_scheme_conformance(version_name, scheme=scheme)
 
-    root_dir = getattr(settings, "APIVER_ROOT_DIR", None)
-    if not root_dir:
-        raise InitError(
-            "APIVER_ROOT_DIR is not set — apiver doesn't know where the aggregation root lives "
-            "(ADR 0007 item 3)."
-        )
+    root_dir = resolve_root_dir()
     root_prefix = getattr(settings, "APIVER_ROOT_PREFIX", None)
     if root_prefix is None:
         raise InitError(
@@ -1038,12 +1050,7 @@ def write_init(*, prefix: str | None) -> tuple[Path, Path]:
     scheme = _configured_scheme()
     display_name = _validate_scheme_conformance(base_name, scheme=scheme)
 
-    root_dir = getattr(settings, "APIVER_ROOT_DIR", None)
-    if not root_dir:
-        raise InitError(
-            "APIVER_ROOT_DIR is not set — apiver doesn't know where to write registry.py. Set it to "
-            "the dotted path of the aggregation root package (ADR 0007 item 3)."
-        )
+    root_dir = resolve_root_dir()
     root_prefix = getattr(settings, "APIVER_ROOT_PREFIX", None)
     if root_prefix is None:
         raise InitError(
@@ -1191,12 +1198,7 @@ def write_alias(name: str, *, from_version: str) -> Path:
     if not from_version.isidentifier():
         raise InitError(f"--from {from_version!r} is not a valid Python identifier.")
 
-    root_dir = getattr(settings, "APIVER_ROOT_DIR", None)
-    if not root_dir:
-        raise InitError(
-            "APIVER_ROOT_DIR is not set — apiver doesn't know where the aggregation root lives "
-            "(ADR 0007 item 3)."
-        )
+    root_dir = resolve_root_dir()
     root_prefix = getattr(settings, "APIVER_ROOT_PREFIX", None)
     if root_prefix is None:
         raise InitError(

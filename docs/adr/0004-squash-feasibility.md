@@ -4,6 +4,15 @@ status: accepted
 
 # Squash is feasible but novel, best-effort by design, and paired with a live-version guardrail
 
+**Superseded in part by ADR 0009 (ticket #77):** this ADR's LibCST/`__mro__`-reflection mechanism (items
+1–4, 6) assumed a version's root directory holds implementation code to flatten. ADR 0003's ticket #73
+amendment already established the opposite before ticket #77 was scoped — a version's root only ever had
+to contain `registry.py` — which means squash never had a class body to splice. ADR 0009 replaces the
+mechanism with a much narrower `registry.py`-only flattening. **Item 8 (the `Live`/`Archived` guardrail,
+`APIVER_MAX_LIVE_VERSIONS`) is unaffected and remains in force as written**, including its ticket #41
+amendment below — read the rest of this document as historical record of the feasibility question, not
+as squash's current design.
+
 Squash ships at 1.0, not 0.1, but was declared non-negotiable during charting — the answer to the
 endless-chain problem inherent to a deltas-forward architecture. This is the gate that confirms it's
 actually reachable given ADR 0001–0003, before anything promises it.

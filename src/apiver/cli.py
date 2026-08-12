@@ -203,6 +203,25 @@ def _cmd_check(*, versions: list[str]) -> int:
     return 0
 
 
+def _cmd_squash(*, version: str) -> int:
+    from .drf.squash import SquashError, squash_version
+
+    try:
+        result = squash_version(version)
+    except SquashError as exc:
+        print(f"apiver: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"wrote {result.registry_path}")
+    if result.absorbed:
+        print(
+            f"apiver: {', '.join(result.absorbed)} are no longer referenced by {result.target!r} — "
+            "safe to delete by hand once you're satisfied with the result (squash never deletes "
+            "anything itself)."
+        )
+    return 0
+
+
 def _django_settings():
     from django.conf import settings
 
@@ -332,6 +351,19 @@ def main(argv: list[str] | None = None) -> int:
         help="Versions to check (default: every version in APIVER_VERSIONS).",
     )
 
+    squash_parser = subparsers.add_parser(
+        "squash",
+        help="Flatten a version's whole ancestor chain into its own standalone, parentless registry.py "
+        "(ticket #77, ADR 0009). Refuses if any absorbed version still has implementation code in its "
+        "own root (ADR 0003's ticket #77 amendment) — auto-applied to the target's registry.py, but "
+        "never deletes anything.",
+    )
+    squash_parser.add_argument(
+        "version",
+        help="The version to flatten into (e.g. v3) — absorbs its whole ancestor chain, leaving it "
+        "with no parent.",
+    )
+
     versions_parser = subparsers.add_parser(
         "versions",
         help="Print lineage, frozen status, lifecycle state, alias pointers and route composition "
@@ -380,6 +412,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_diff(old_version=args.old_version, new_version=args.new_version, as_json=args.as_json)
     if args.command == "check":
         return _cmd_check(versions=args.versions)
+    if args.command == "squash":
+        return _cmd_squash(version=args.version)
 
     parser.error(f"unknown command {args.command!r}")
     return 2

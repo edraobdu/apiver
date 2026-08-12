@@ -37,6 +37,7 @@ from ..versions_report import MANIFEST_FILENAME, load_committed_manifest
 from .version import Alias, Version
 
 __all__ = [
+    "DEFAULT_ROOT_DIR",
     "MANIFEST_FILENAME",
     "ManifestError",
     "build_manifest",
@@ -44,11 +45,22 @@ __all__ = [
     "load_version",
     "manifest_diff",
     "manifest_path",
+    "resolve_root_dir",
 ]
+
+#: `APIVER_ROOT_DIR`'s default when unset (ADR 0003's ticket #77 amendment) —
+#: unlikely to collide with a project's own pre-existing `api/` app, now that
+#: a version's root is apiver's exclusively (registry.py only, nothing else).
+DEFAULT_ROOT_DIR = "apiversions"
 
 
 class ManifestError(RuntimeError):
     """The manifest could not be built from the configured settings."""
+
+
+def resolve_root_dir() -> str:
+    """`APIVER_ROOT_DIR`, defaulting to `DEFAULT_ROOT_DIR` when unset."""
+    return getattr(settings, "APIVER_ROOT_DIR", None) or DEFAULT_ROOT_DIR
 
 
 def _import_object(dotted_path: str) -> Any:
@@ -73,19 +85,8 @@ def _load_versions() -> dict[str, Version]:
             "manifest for. Set APIVER_VERSIONS = ['v1', 'v2', ...] in settings."
         )
 
-    root_dir = _require_root_dir()
+    root_dir = resolve_root_dir()
     return {name: load_version(name, root_dir=root_dir) for name in names}
-
-
-def _require_root_dir() -> str:
-    root_dir: str | None = getattr(settings, "APIVER_ROOT_DIR", None)
-    if not root_dir:
-        raise ManifestError(
-            "apiver needs APIVER_ROOT_DIR set to derive a live Version's dotted path "
-            "as f'{APIVER_ROOT_DIR}.{name}.registry.{name}' — without it, there is no live "
-            "Version object to read (ADR 0007 items 3, 5)."
-        )
-    return root_dir
 
 
 def load_version(name: str, *, root_dir: str | None = None) -> Version:
@@ -95,7 +96,7 @@ def load_version(name: str, *, root_dir: str | None = None) -> Version:
     ticket #76) that need an arbitrary named version rather than every
     configured one."""
     if root_dir is None:
-        root_dir = _require_root_dir()
+        root_dir = resolve_root_dir()
     dotted_path = f"{root_dir}.{name}.registry.{name}"
     obj = _import_object(dotted_path)
     if not isinstance(obj, Version):
@@ -110,13 +111,7 @@ def _load_aliases() -> dict[str, Alias]:
     if not names:
         return {}
 
-    root_dir: str | None = getattr(settings, "APIVER_ROOT_DIR", None)
-    if not root_dir:
-        raise ManifestError(
-            "apiver needs APIVER_ROOT_DIR set to derive each APIVER_ALIASES name's dotted path as "
-            "f'{APIVER_ROOT_DIR}.urls.{name}' — without it, there is no live Alias object to read "
-            "(ADR 0007's second amendment)."
-        )
+    root_dir = resolve_root_dir()
 
     aliases: dict[str, Alias] = {}
     for name in names:

@@ -11,7 +11,14 @@ from apiver.drf import (
     check_manifest_freshness,
     check_max_live_versions,
 )
-from apiver.drf.manifest import _load_aliases, load_committed_manifest, manifest_diff, manifest_path
+from apiver.drf.manifest import (
+    DEFAULT_ROOT_DIR,
+    _load_aliases,
+    load_committed_manifest,
+    manifest_diff,
+    manifest_path,
+    resolve_root_dir,
+)
 from tests.fixtures_manifest.api.urls import stable
 from tests.fixtures_manifest.api.v1.registry import v1
 from tests.fixtures_manifest.api.v2.registry import FIXED_SUNSET, v2
@@ -100,10 +107,9 @@ def test_no_configured_versions_raises_a_manifest_error():
         build_manifest()
 
 
-@override_settings(APIVER_VERSIONS=["v1", "v2"], APIVER_ROOT_DIR=None)
-def test_versions_configured_without_a_root_dir_raises_a_manifest_error():
-    with pytest.raises(ManifestError):
-        build_manifest()
+@override_settings(APIVER_ROOT_DIR=None)
+def test_root_dir_defaults_to_apiversions_when_unset():
+    assert resolve_root_dir() == DEFAULT_ROOT_DIR == "apiversions"
 
 
 @override_settings(APIVER_ROOT_DIR=ROOT_DIR, APIVER_VERSIONS=["does_not_exist"])
@@ -126,8 +132,8 @@ def test_no_configured_aliases_is_fine_aliases_are_optional():
 
 
 @override_settings(APIVER_ROOT_DIR=None, APIVER_ALIASES=["stable"])
-def test_aliases_configured_without_a_root_dir_raises_a_manifest_error():
-    with pytest.raises(ManifestError):
+def test_aliases_configured_without_a_root_dir_resolves_the_default_root_dir():
+    with pytest.raises(ManifestError, match="apiversions"):
         _load_aliases()
 
 

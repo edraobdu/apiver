@@ -193,7 +193,14 @@ def test_alias_requires_the_from_flag():
     assert "--from" in result.stderr
 
 
-def test_alias_requires_apiver_root_dir(tmp_path):
+def test_alias_defaults_the_root_dir_when_apiver_root_dir_is_unset(tmp_path):
+    """APIVER_ROOT_DIR unset now falls back to "apiversions" (ADR 0003's
+    ticket #77 amendment) instead of refusing outright — but this fixture
+    project's v2 lives under "tests.fixtures_mount.api", not "apiversions",
+    so --from v2 still fails to import, just for a different reason. Run
+    with cwd=tmp_path: alias also resolves the (now-defaulted) root dir
+    before failing, and any incidental filesystem side effect must never
+    land in the real repo."""
     _mount_v2()
     (tmp_path / "settings_no_root_dir.py").write_text(
         "from tests.fixtures_mount.settings import *  # noqa: F403\nAPIVER_ROOT_DIR = None\n"
@@ -204,14 +211,14 @@ def test_alias_requires_apiver_root_dir(tmp_path):
 
     result = subprocess.run(
         [sys.executable, "-m", "apiver.cli", "alias", "stable", "--from", "v2"],
-        cwd=str(REPO_ROOT),
+        cwd=str(tmp_path),
         env=env,
         capture_output=True,
         text=True,
     )
 
     assert result.returncode != 0
-    assert "APIVER_ROOT_DIR" in result.stderr
+    assert "apiversions.v2.registry" in result.stderr
 
 
 def test_alias_requires_django_settings_module():
