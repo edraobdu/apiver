@@ -276,7 +276,7 @@ $ uv add apiver   # or your project's usual dependency manager
 ```
 
 Add `"apiver"` to `INSTALLED_APPS` — it has no models, but its system checks (layout, manifest
-freshness, live-version count) only register through `AppConfig.ready()` — and three settings:
+freshness, live-version count) only register through `AppConfig.ready()` — and two settings:
 
 ```diff
  # config/settings.py
@@ -290,11 +290,10 @@ freshness, live-version count) only register through `AppConfig.ready()` — and
  ]
 +
 +APIVER_ROOT_PREFIX = "api/"  # absolute URL path every version mounts under
-+APIVER_BASE_VERSION = "v1"  # the name init adopts the existing API as
 +APIVER_VERSIONS = ["v1"]  # hand-maintained list of live version names
 ```
 
-There's a fourth setting, `APIVER_ROOT_DIR` — the dotted path to the package holding every version's own
+There's a third setting, `APIVER_ROOT_DIR` — the dotted path to the package holding every version's own
 `registry.py` — but it's left out above deliberately: it defaults to `"apiversions"`, a name your project
 almost certainly isn't already using, precisely so it never collides with the `api/` app most projects
 already have. Only set it explicitly if you want apiver's own package to live somewhere else.
@@ -302,11 +301,15 @@ already have. Only set it explicitly if you want apiver's own package to live so
 Then:
 
 ```console
-$ apiver init
+$ apiver init --base v1
 wrote .../apiversions/v1/registry.py
 wrote .../apiversions/urls.py
 wrote .../apiver.toml
 ```
+
+`--base` names the version `init` adopts the existing project as — a one-shot input for this single
+invocation, not a setting: `init` writes `registry.py` once and never regenerates it, so nothing
+afterward ever needs to know what you passed.
 
 `init` walks your live `ROOT_URLCONF`, classifies every route it finds under the prefix you gave it,
 and writes a `registry.py` that imports your **existing** views and serializers exactly where they
@@ -468,8 +471,8 @@ $ apiver remove v1
 wrote .../apiversions/v2/registry.py
 wrote .../apiversions/urls.py
 apiver: v2 is now an independent Base Version — 'v1's parent link has been cut.
-apiver: 'v1' is now Archived — drop it from APIVER_VERSIONS and APIVER_BASE_VERSION in settings.py, then
-`git rm -r` its directory once you've confirmed nothing else needs it.
+apiver: 'v1' is now Archived — drop it from APIVER_VERSIONS in settings.py, then `git rm -r` its
+directory once you've confirmed nothing else needs it.
 ```
 
 `apiver remove v1` rewrites every direct child's `registry.py` itself — cutting the `.derive('v1')` line
@@ -493,9 +496,9 @@ callers — unless `--force` is passed; pulling a mount out from under live call
 needs an explicit override.
 
 **`remove` never deletes a directory itself, and it never edits `settings.py`.** Both stay hand-edits:
-drop the archived version from `APIVER_VERSIONS` (and `APIVER_BASE_VERSION`, if it named it) yourself,
-then `git rm -r` its directory once you've confirmed nothing else needs it — an accidental deletion of
-source code is a different order of risk than a rewritten text file.
+drop the archived version from `APIVER_VERSIONS` yourself, then `git rm -r` its directory once you've
+confirmed nothing else needs it — an accidental deletion of source code is a different order of risk
+than a rewritten text file.
 
 ## Version-aware links: apiver.drf.reverse
 
@@ -576,7 +579,7 @@ then `DJANGO_SETTINGS_MODULE`, then `[tool.apiver].django_settings_module` in `p
 
 | Command | What it does |
 | --- | --- |
-| `apiver init [--prefix PATH]` | Adopts an existing project's routes as the base version, or scaffolds a route-less one — moves nothing. |
+| `apiver init --base NAME [--prefix PATH]` | Adopts an existing project's routes as the base version named `NAME`, or scaffolds a route-less one — moves nothing. |
 | `apiver mount NAME --from PARENT` | Scaffolds a new authored version's `registry.py`, derived from `PARENT`, with schema/docs already wired. |
 | `apiver alias NAME --from VERSION` | Declares a movable name pointing at an already-mounted version. |
 | `apiver manifest [--check]` | Writes `apiver.toml`, a committed snapshot of every version's resolution table; `--check` exits non-zero if it's stale, the same idiom as `makemigrations --check`. |
@@ -592,7 +595,6 @@ then `DJANGO_SETTINGS_MODULE`, then `[tool.apiver].django_settings_module` in `p
 | --- | --- |
 | `APIVER_ROOT_DIR` | Dotted path to the package holding the Aggregation Root and every version's own package. Defaults to `"apiversions"` — deliberately not `"api"`, so it never collides with a project's own pre-existing API app when adopting apiver into an existing project. |
 | `APIVER_ROOT_PREFIX` | Absolute URL path every version mounts under. |
-| `APIVER_BASE_VERSION` | The name `apiver init` adopts the existing API as. |
 | `APIVER_VERSIONS` | Hand-maintained list of live version names. |
 | `APIVER_ALIASES` | Hand-maintained list of declared alias names. |
 | `APIVER_VERSION_SCHEME` | The project's version-naming Scheme — `sequential` (default), `semver`, or `date` — used to validate, format, and chronologically order version names ([ADR 0008](docs/adr/0008-version-schemes.md)). |

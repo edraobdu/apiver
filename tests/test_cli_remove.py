@@ -66,21 +66,12 @@ def test_remove_reports_the_reparented_children():
     assert "independent Base Version" in result.stdout
 
 
-def test_remove_reports_the_settings_cleanup_hint_including_base_version():
+def test_remove_reports_the_settings_cleanup_hint():
     result = _run("remove", "v1")
 
     assert result.returncode == 0, result.stderr
     assert "APIVER_VERSIONS" in result.stdout
-    assert "APIVER_BASE_VERSION" in result.stdout
     assert "git rm -r" in result.stdout
-
-
-def test_remove_reports_the_settings_cleanup_hint_without_base_version():
-    result = _run("remove", "v30", "--force")
-
-    assert result.returncode == 0, result.stderr
-    assert "APIVER_VERSIONS" in result.stdout
-    assert "APIVER_BASE_VERSION" not in result.stdout
 
 
 def test_removed_registry_reimports_cleanly_as_a_fresh_base_version():

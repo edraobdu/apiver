@@ -28,7 +28,6 @@ def _use_remove_settings():
     with override_settings(
         APIVER_ROOT_DIR=ROOT_DIR,
         APIVER_ROOT_PREFIX="api/",
-        APIVER_BASE_VERSION="v1",
         APIVER_VERSIONS=["v1", "v2", "v10", "v11", "v12", "v20", "v21", "v30", "v31", "v40"],
     ):
         yield
@@ -65,7 +64,6 @@ def test_remove_cuts_the_only_childs_parent_link(_restore_fixture_files):
     assert result.registry_paths[0].name == "registry.py"
     assert "v2" in str(result.registry_paths[0])
     assert result.aggregation_path.name == "urls.py"
-    assert result.was_base_version is True
 
 
 def test_remove_rewrites_the_childs_registry_as_a_standalone_base_version(_restore_fixture_files):
@@ -139,13 +137,3 @@ def test_remove_force_archives_a_never_deprecated_version(_restore_fixture_files
     result = remove_version("v30", force=True)
 
     assert result.children == ["v31"]
-
-
-def test_remove_reports_when_the_target_was_the_base_version(_restore_fixture_files):
-    result = remove_version("v1")
-    assert result.was_base_version is True
-
-
-def test_remove_reports_when_the_target_was_not_the_base_version(_restore_fixture_files):
-    result = remove_version("v30", force=True)
-    assert result.was_base_version is False

@@ -462,7 +462,7 @@ def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str, base_
     # Deterministic regardless of whether (or how) the pre-existing project
     # named its own schema route — every discovered Swagger/Redoc view below
     # points at exactly this name, and nothing else in the generated registry
-    # ever collides with it, since APIVER_BASE_VERSION is unique per project.
+    # ever collides with it, since a project has only one Base Version.
     # `Version.schema_route_name` is the single source of this convention
     # (ticket 22) — computed off a throwaway Version instance rather than
     # duplicating the string format here.
@@ -1024,7 +1024,7 @@ def write_mount(version_name: str, *, from_version: str) -> tuple[Path, Path]:
     return registry_path, aggregation_path
 
 
-def write_init(*, prefix: str | None) -> tuple[Path, Path]:
+def write_init(base: str, *, prefix: str | None) -> tuple[Path, Path]:
     """The full `apiver init` flow: resolve where to write, walk the
     live URLconf, classify and verify every in-scope route, then write
     `registry.py` and mount it into the Aggregation Root (ADR 0003 items
@@ -1033,18 +1033,19 @@ def write_init(*, prefix: str | None) -> tuple[Path, Path]:
     if any route under `prefix` could not be classified, regenerated, or
     verified.
 
+    `base` is the name `init` adopts the existing project as (`--base`,
+    ticket #86) — a one-shot bootstrap input for this single invocation,
+    not an ongoing setting: `init` only ever writes `registry.py` once and
+    never regenerates it (ADR 0003 item 4), so nothing after this call ever
+    needs to read it again.
+
     Returns `(registry_path, aggregation_path)`.
     """
-    base_name = getattr(settings, "APIVER_BASE_VERSION", None)
-    if not base_name:
-        raise InitError(
-            "APIVER_BASE_VERSION is not set — apiver doesn't know which version `init` is adopting "
-            "the project as. Set it in settings, alongside APIVER_ROOT_DIR (ADR 0007 item 3)."
-        )
+    base_name = base
     if not base_name.isidentifier():
         raise InitError(
-            f"APIVER_BASE_VERSION={base_name!r} is not a valid Python identifier — it becomes the "
-            "module-level variable name in the generated registry.py."
+            f"--base {base_name!r} is not a valid Python identifier — it becomes the module-level "
+            "variable name in the generated registry.py."
         )
 
     scheme = _configured_scheme()
