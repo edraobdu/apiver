@@ -55,11 +55,11 @@ def _resolve_django_settings_module(settings_flag: str | None) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _cmd_init(*, prefix: str | None, manifest_path: str | None) -> int:
+def _cmd_init(*, base: str, prefix: str | None, manifest_path: str | None) -> int:
     from .drf.init import InitError, write_init
 
     try:
-        registry_path, aggregation_path = write_init(prefix=prefix)
+        registry_path, aggregation_path = write_init(base, prefix=prefix)
     except InitError as exc:
         print(f"apiver: {exc}", file=sys.stderr)
         return 1
@@ -244,11 +244,8 @@ def _cmd_remove(*, version: str, force: bool) -> int:
             "been cut."
         )
 
-    settings_hint = "APIVER_VERSIONS"
-    if result.was_base_version:
-        settings_hint += " and APIVER_BASE_VERSION"
     print(
-        f"apiver: {result.target!r} is now Archived — drop it from {settings_hint} in settings.py, then "
+        f"apiver: {result.target!r} is now Archived — drop it from APIVER_VERSIONS in settings.py, then "
         f"`git rm -r` its directory once you've confirmed nothing else needs it."
     )
     return 0
@@ -304,6 +301,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Start the base version: adopt an existing project's routes under --prefix if there are "
         "any, or scaffold a route-less one if there aren't — generating registry.py and the "
         "manifest, moving nothing.",
+    )
+    init_parser.add_argument(
+        "--base",
+        required=True,
+        help="The name init adopts the existing project as (e.g. v1) — becomes the module-level "
+        "variable name in the generated registry.py. A one-shot bootstrap input, not a setting: "
+        "init writes registry.py once and never regenerates it.",
     )
     init_parser.add_argument(
         "--prefix",
@@ -456,7 +460,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "manifest":
         return _cmd_manifest(check=args.check, path=args.path)
     if args.command == "init":
-        return _cmd_init(prefix=args.prefix, manifest_path=args.manifest_path)
+        return _cmd_init(base=args.base, prefix=args.prefix, manifest_path=args.manifest_path)
     if args.command == "mount":
         return _cmd_mount(version_name=args.version, from_version=args.from_version)
     if args.command == "alias":

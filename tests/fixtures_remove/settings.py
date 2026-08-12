@@ -33,7 +33,6 @@ DATABASES = {
 
 APIVER_ROOT_DIR = "tests.fixtures_remove.api"
 APIVER_ROOT_PREFIX = "api/"
-APIVER_BASE_VERSION = "v1"
 APIVER_VERSIONS = [
     "v1",
     "v2",

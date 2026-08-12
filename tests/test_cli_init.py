@@ -57,7 +57,7 @@ def test_init_writes_registry_py_the_aggregation_root_and_the_manifest(tmp_path)
     manifest_target = tmp_path / "apiver.toml"
     before = _snapshot(FIXTURE_ROOT)
 
-    result = _run("--prefix", "api/", "--manifest-path", str(manifest_target))
+    result = _run("--base", "v1", "--prefix", "api/", "--manifest-path", str(manifest_target))
 
     assert result.returncode == 0, result.stderr
     assert (GENERATED_ROOT / "__init__.py").is_file()
@@ -139,7 +139,7 @@ def test_init_writes_a_route_less_base_version_when_nothing_is_discovered(tmp_pa
     version."""
     manifest_target = tmp_path / "apiver.toml"
 
-    result = _run("--prefix", "nomatch/", "--manifest-path", str(manifest_target))
+    result = _run("--base", "v1", "--prefix", "nomatch/", "--manifest-path", str(manifest_target))
 
     assert result.returncode == 0, result.stderr
     registry_path = GENERATED_ROOT / "registry.py"
@@ -170,7 +170,7 @@ def test_init_creates_the_root_package_when_it_does_not_exist_yet(tmp_path):
     before = _snapshot(FIXTURE_ROOT)
 
     try:
-        result = _run("--prefix", "api/", "--manifest-path", str(manifest_target))
+        result = _run("--base", "v1", "--prefix", "api/", "--manifest-path", str(manifest_target))
     finally:
         # Restore the checked-in (empty) api/__init__.py the rest of this
         # module's tests assume is already there, regardless of outcome.
@@ -192,7 +192,7 @@ def test_init_creates_the_root_package_when_it_does_not_exist_yet(tmp_path):
 
 
 def test_init_infers_prefix_from_root_prefix_setting_when_unset(tmp_path):
-    result = _run("--manifest-path", str(tmp_path / "apiver.toml"))
+    result = _run("--base", "v1", "--manifest-path", str(tmp_path / "apiver.toml"))
 
     assert result.returncode == 0, result.stderr
     registry_path = GENERATED_ROOT / "registry.py"
@@ -204,11 +204,11 @@ def test_init_infers_prefix_from_root_prefix_setting_when_unset(tmp_path):
 
 
 def test_init_refuses_to_overwrite_an_existing_registry(tmp_path):
-    first = _run("--prefix", "api/", "--manifest-path", str(tmp_path / "apiver.toml"))
+    first = _run("--base", "v1", "--prefix", "api/", "--manifest-path", str(tmp_path / "apiver.toml"))
     assert first.returncode == 0, first.stderr
     written = (GENERATED_ROOT / "registry.py").read_text()
 
-    second = _run("--prefix", "api/", "--manifest-path", str(tmp_path / "apiver.toml"))
+    second = _run("--base", "v1", "--prefix", "api/", "--manifest-path", str(tmp_path / "apiver.toml"))
 
     assert second.returncode != 0
     assert "already exists" in second.stderr
@@ -216,13 +216,13 @@ def test_init_refuses_to_overwrite_an_existing_registry(tmp_path):
 
 
 def test_init_refuses_when_the_aggregation_root_already_mounts_the_base_version(tmp_path):
-    first = _run("--prefix", "api/", "--manifest-path", str(tmp_path / "apiver.toml"))
+    first = _run("--base", "v1", "--prefix", "api/", "--manifest-path", str(tmp_path / "apiver.toml"))
     assert first.returncode == 0, first.stderr
     # Simulate a re-run after only registry.py was removed by hand — the
     # aggregation root survives untouched, same as a real project's.
     shutil.rmtree(GENERATED_ROOT)
 
-    second = _run("--prefix", "api/", "--manifest-path", str(tmp_path / "apiver.toml"))
+    second = _run("--base", "v1", "--prefix", "api/", "--manifest-path", str(tmp_path / "apiver.toml"))
 
     assert second.returncode != 0
     assert "already mounted" in second.stderr
@@ -230,6 +230,8 @@ def test_init_refuses_when_the_aggregation_root_already_mounts_the_base_version(
 
 def test_init_reports_every_diagnostic_and_writes_nothing(tmp_path):
     result = _run(
+        "--base",
+        "v1",
         "--prefix",
         "api/",
         "--manifest-path",
@@ -244,33 +246,13 @@ def test_init_reports_every_diagnostic_and_writes_nothing(tmp_path):
     assert not GENERATED_AGGREGATION_ROOT.exists()
 
 
-def test_init_requires_apiver_base_version(tmp_path):
-    (tmp_path / "settings_no_base.py").write_text(
-        "from tests.fixtures_init.settings import *  # noqa: F403\nAPIVER_BASE_VERSION = None\n"
-    )
-    env = dict(os.environ)
-    env["DJANGO_SETTINGS_MODULE"] = "settings_no_base"
-    env["PYTHONPATH"] = os.pathsep.join([str(REPO_ROOT / "src"), str(REPO_ROOT), str(tmp_path)])
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "apiver.cli",
-            "init",
-            "--prefix",
-            "api/",
-            "--manifest-path",
-            str(tmp_path / "apiver.toml"),
-        ],
-        cwd=str(REPO_ROOT),
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+def test_init_requires_base_flag(tmp_path):
+    """`--base` (ticket #86) is required, argparse-style, exactly as
+    `apiver mount`'s `--from` already is — there's no settings fallback."""
+    result = _run("--prefix", "api/", "--manifest-path", str(tmp_path / "apiver.toml"))
 
     assert result.returncode != 0
-    assert "APIVER_BASE_VERSION" in result.stderr
+    assert "--base" in result.stderr
     assert not GENERATED_ROOT.exists()
 
 
@@ -293,6 +275,8 @@ def test_init_defaults_the_root_dir_when_apiver_root_dir_is_unset(tmp_path):
             "-m",
             "apiver.cli",
             "init",
+            "--base",
+            "v1",
             "--prefix",
             "api/",
             "--manifest-path",
@@ -313,29 +297,7 @@ def test_init_refuses_a_scheme_nonconforming_base_version(tmp_path):
     """ticket #67, ADR 0008 item 5: under the default `sequential` scheme,
     'va' is a valid Python identifier but not a valid slug (its base isn't
     all digits) — init must refuse it before writing anything."""
-    (tmp_path / "settings_bad_scheme.py").write_text(
-        "from tests.fixtures_init.settings import *  # noqa: F403\nAPIVER_BASE_VERSION = 'va'\n"
-    )
-    env = dict(os.environ)
-    env["DJANGO_SETTINGS_MODULE"] = "settings_bad_scheme"
-    env["PYTHONPATH"] = os.pathsep.join([str(REPO_ROOT / "src"), str(REPO_ROOT), str(tmp_path)])
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "apiver.cli",
-            "init",
-            "--prefix",
-            "api/",
-            "--manifest-path",
-            str(tmp_path / "apiver.toml"),
-        ],
-        cwd=str(REPO_ROOT),
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    result = _run("--base", "va", "--prefix", "api/", "--manifest-path", str(tmp_path / "apiver.toml"))
 
     assert result.returncode != 0
     assert "does not conform" in result.stderr
@@ -352,6 +314,8 @@ def test_init_uses_display_name_in_generated_urls_under_semver_scheme(tmp_path):
     generated_root = FIXTURE_ROOT / "api" / "v1_0_0"
     try:
         result = _run(
+            "--base",
+            "v1_0_0",
             "--prefix",
             "api/",
             "--manifest-path",
@@ -376,6 +340,8 @@ def test_init_uses_display_name_in_generated_urls_under_date_scheme(tmp_path):
     generated_root = FIXTURE_ROOT / "api" / "d2026_08_11"
     try:
         result = _run(
+            "--base",
+            "d2026_08_11",
             "--prefix",
             "api/",
             "--manifest-path",

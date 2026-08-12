@@ -63,14 +63,13 @@ checks (layout, manifest freshness, max-live-versions) only register via `AppCon
  ]
 ```
 
-## 2. Add the four settings, and skip repeating `--settings`
+## 2. Add the three settings, and skip repeating `--settings`
 
 At the bottom of `config/settings.py`:
 
 ```python
 APIVER_ROOT_DIR = "api"  # dotted path to the package holding every version
 APIVER_ROOT_PREFIX = "api/"  # absolute URL path every version mounts under
-APIVER_BASE_VERSION = "v1"  # the name init adopts the existing API as
 APIVER_VERSIONS = ["v1"]  # hand-maintained list of Live version names
 ```
 
@@ -101,11 +100,14 @@ is a project-local default, always overridable. (`manage.py` needs no equivalent
 ## 3. Run `apiver init`
 
 ```console
-$ uv run apiver init
+$ uv run apiver init --base v1
 wrote .../reference/api/v1/registry.py
 wrote .../reference/api/urls.py
 wrote .../reference/apiver.toml
 ```
+
+`--base v1` is the name `init` adopts the existing project as — a one-shot input for this single
+invocation, not a setting: `init` writes `registry.py` once and never regenerates it.
 
 `api/v1/registry.py` is generated in full — every pre-existing resource (`addresses`,
 `legacy-invoices`, `notifications` plus its `mark-all-read` action, `orders` plus its CSV export,

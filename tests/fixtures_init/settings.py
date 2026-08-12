@@ -35,8 +35,8 @@ ROOT_URLCONF = "tests.fixtures_init.urls"
 # The parent package (tests/fixtures_init/api/) is committed; the leaf
 # (api/v1/, and api/urls.py) is what `apiver init` writes, and tests
 # clean it up after themselves so the fixture tree stays pristine between
-# runs.
-APIVER_BASE_VERSION = "v1"
+# runs. The name it writes as ("v1") is now an `apiver init --base v1` CLI
+# flag, not a setting (ticket #86).
 APIVER_ROOT_DIR = "tests.fixtures_init.api"
 APIVER_ROOT_PREFIX = "api/"
 APIVER_VERSIONS = ["v1"]

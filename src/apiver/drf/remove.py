@@ -12,8 +12,8 @@ untouched (ADR 0009 item 5). `remove` finishes the job for a version named
 `VERSION`: every direct child's `.derive(VERSION)` line is cut (turning it
 into its own independent Base Version — apiver's model already tolerates
 more than one, ADR 0002), `VERSION`'s mount is dropped from the Aggregation
-Root, and what's left (its `APIVER_VERSIONS`/`APIVER_BASE_VERSION` entry,
-its directory) is printed for a developer to finish by hand.
+Root, and what's left (its `APIVER_VERSIONS` entry, its directory) is
+printed for a developer to finish by hand.
 
 Hard precondition, checked structurally with the same `resolution_table`/
 `_resolved_keys()` machinery squash's own preflight already uses: every
@@ -60,9 +60,6 @@ class RemoveResult:
     children: list[str] = field(default_factory=list)
     registry_paths: list[Path] = field(default_factory=list)
     aggregation_path: Path = field(default_factory=Path)
-    #: True if `target` is (or was) `settings.APIVER_BASE_VERSION` — folded
-    #: into the CLI's settings-cleanup hint alongside `APIVER_VERSIONS`.
-    was_base_version: bool = False
 
 
 def _direct_children(target_name: str, *, root_dir: str) -> list[Version]:
@@ -286,5 +283,4 @@ def remove_version(name: str, *, force: bool = False) -> RemoveResult:
         children=[child.name for child in children],
         registry_paths=registry_paths,
         aggregation_path=aggregation_path,
-        was_base_version=getattr(settings, "APIVER_BASE_VERSION", None) == name,
     )

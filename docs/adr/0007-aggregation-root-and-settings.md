@@ -152,3 +152,15 @@ under `--prefix`, registering both unconditionally at `schema/`/`docs/` exactly 
 does for every later version (item 7's amendment above), so a route-less Base Version is a valid
 outcome, not a failure. A pre-existing schema/docs route, once discovered, keeps its own
 version-qualified name as before — the default only fills the gap when nothing was there to rename.
+
+**Amendment (ticket #86): `APIVER_BASE_VERSION` is dropped from settings entirely — `init` now takes
+the name it adopts the project as via a required `--base` flag, the same shape `mount`'s `--from`
+already has.** Building `apiver remove` (#84) surfaced that this ADR's item 1 decision — keeping
+`APIVER_BASE_VERSION` as a setting rather than a one-shot input — had no runtime owner: `init` reads it
+exactly once, ever, and nothing else (not `checks.py`, not `mount`, `squash`, or `remove`) ever
+consults it again. Once the version it named gets archived, the setting goes stale with nothing to
+correct it — `init` never runs a second time in a project's normal life to notice. The actual "Base
+Version" concept (a `Version` with `parent is None`) is already purely structural and needs no settings
+backing at all; `APIVER_BASE_VERSION` only ever existed to answer a question `init` asks itself once,
+at adoption time. 0.1 has no stability promise yet, so this is a clean break rather than a
+deprecation-warning fallback.
