@@ -26,9 +26,20 @@ making it a chronological point. `apiver alias`'s own name is exempt from scheme
 human label (`stable`, `latest`), not a version point — but its `--from` target is still validated as a
 real, scheme-conforming version.
 
-## Switching schemes mid-project
+## Choosing a scheme at adoption time
 
-`APIVER_VERSION_SCHEME` is a project-wide setting, not a per-version one — and it applies to every
+`APIVER_VERSION_SCHEME` is a genuinely free choice the moment you adopt apiver, regardless of how your
+project versioned things before. `apiver init --base ...` creates the very first version its
+name-validation ever sees, so whatever ad-hoc numbering the project used up to that point — sequential,
+inconsistent, or nonexistent — doesn't constrain the choice at all. Set `APIVER_VERSION_SCHEME` to
+`semver` or `date` before running `apiver init` and the Base Version is validated against it directly;
+apiver never inspects, and doesn't care about, the mechanics of whatever came before it.
+
+## Switching schemes after apiver is already tracking versions
+
+Once apiver *is* tracking Live versions, the scheme is no longer free to change on a whim — this is a
+different situation from the one above. `APIVER_VERSION_SCHEME` is a project-wide setting, not a
+per-version one — and it applies to every
 *currently Live* version, not just newly-mounted ones: `manage.py check` re-derives the manifest on
 every run, which re-validates every name in `APIVER_VERSIONS` against whichever scheme is configured
 right now. Flip `APIVER_VERSION_SCHEME` to `semver` while `v1`/`v2` (plain `sequential` names) are still
