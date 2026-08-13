@@ -13,8 +13,8 @@ existing code becomes the **base version**, exactly where it already lives; ever
 declares only what changed against its parent, and everything untouched resolves straight through to
 the parent's actual handler objects — not copies of them.
 
-> **Status:** pre-1.0 (`0.1.0.dev0`). Everything documented here exists and is covered by tests, but
-> nothing has shipped to PyPI yet and the public API can still move before a real `0.1` tag lands. See
+> **Status:** pre-1.0 (`0.0.1`). Everything documented here exists and is covered by tests, but the
+> public API can still move before a real `0.1` tag lands. See
 > [Status and roadmap](https://apiver.readthedocs.io/#status-and-roadmap) for what that means for you
 > today.
 

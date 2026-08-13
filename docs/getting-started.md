@@ -48,7 +48,7 @@ $ uv sync
 Resolved 25 packages in 394ms
    Building apiver @ file:///.../apiver
 Installed 1 package in 1ms
- ~ apiver==0.1.0.dev0 (from file:///.../apiver)
+ ~ apiver==0.0.1 (from file:///.../apiver)
 ```
 
 `reference/pyproject.toml` already pins `django~=5.2` to match apiver's own supported range — a
