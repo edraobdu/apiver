@@ -37,4 +37,20 @@ jobs:
         run: uv run pre-commit run --all-files
 
       - name: Test
+        if: matrix.python-version != '3.13'
         run: uv run pytest
+
+      - name: Test with coverage
+        if: matrix.python-version == '3.13'
+        env:
+          COVERAGE_PROCESS_START: pyproject.toml
+        run: |
+          uv run coverage run -m pytest
+          uv run coverage combine
+          uv run coverage report -m | tee /tmp/coverage-report.txt
+          {
+            echo '### Coverage'
+            echo '```'
+            cat /tmp/coverage-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
