@@ -15,6 +15,7 @@ apiver = "apiver.cli:main"
 
 [dependency-groups]
 dev = [
+    "coverage>=7.0",
     "pre-commit>=4.0",
     "pytest>=8.0",
     "pytest-django>=4.9",
@@ -26,6 +27,18 @@ DJANGO_SETTINGS_MODULE = "tests.settings"
 python_files = ["test_*.py"]
 testpaths = ["tests"]
 pythonpath = ["src", "."]
+
+[tool.coverage.run]
+source = ["apiver"]
+parallel = true
+relative_files = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
 
 [tool.ruff]
 line-length = 110
