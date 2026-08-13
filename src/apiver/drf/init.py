@@ -119,6 +119,7 @@ class _Endpoint:
     actions: dict[str, str] | None
     initkwargs: dict[str, Any]
     is_regex_declared: bool  # re_path(), not path() — checked in discover()
+    matched_prefix: str  # which of discover()'s (non-overlapping) --prefix values this fell under
 
 
 @dataclass(frozen=True)
@@ -161,7 +162,7 @@ def _overlaps(a: str, b: str) -> bool:
 def _walk(
     patterns: Any,
     *,
-    prefix: str,
+    prefixes: list[str],
     ancestor_prefix: str,
     depth: int,
     endpoints: list[_Endpoint],
@@ -177,8 +178,8 @@ def _walk(
     for pattern in patterns:
         if isinstance(pattern, URLResolver):
             child_prefix = ancestor_prefix + str(pattern.pattern)
-            if not _overlaps(_strip_anchors(child_prefix), prefix):
-                continue  # provably outside --prefix; do not even walk in
+            if not any(_overlaps(_strip_anchors(child_prefix), prefix) for prefix in prefixes):
+                continue  # provably outside every --prefix; do not even walk in
 
             if isinstance(pattern.pattern, LocalePrefixPattern):
                 diagnostics.append(
@@ -199,7 +200,7 @@ def _walk(
 
             _walk(
                 pattern.url_patterns,
-                prefix=prefix,
+                prefixes=prefixes,
                 ancestor_prefix=child_prefix,
                 depth=depth + 1,
                 endpoints=endpoints,
@@ -208,7 +209,8 @@ def _walk(
         elif isinstance(pattern, URLPattern):
             declared = str(pattern.pattern)
             absolute = _strip_anchors(ancestor_prefix + declared)
-            if not absolute.startswith(prefix):
+            matched_prefix = next((prefix for prefix in prefixes if absolute.startswith(prefix)), None)
+            if matched_prefix is None:
                 continue
             if _FORMAT_SUFFIX_RE.search(declared):
                 continue  # ticket 02 F16: DefaultRouter's format-suffix duplicate
@@ -228,6 +230,7 @@ def _walk(
                     actions=getattr(callback, "actions", None),
                     initkwargs=getattr(callback, "initkwargs", {}),
                     is_regex_declared=isinstance(pattern.pattern, RegexPattern),
+                    matched_prefix=matched_prefix,
                 )
             )
 
@@ -344,9 +347,20 @@ def _derive_router_prefix(
     return None
 
 
-def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str, base_name: str) -> DiscoveryResult:
+def discover(
+    root_patterns: Any, *, prefixes: list[str], schema_mount_prefix: str, base_name: str
+) -> DiscoveryResult:
     """Walk `root_patterns` (a URLconf's `urlpatterns` list), classify
     every in-scope route, and turn it into a plan for `Version.register()`.
+
+    `prefixes` (ticket #61) is one or more absolute paths — a scattered
+    pre-existing project's routes rarely all live under one ancestor,
+    so `--prefix` is multi-valued and every route under any of them is
+    unioned into a single discovery pass, keyed relative to whichever
+    prefix it matched (`_Endpoint.matched_prefix`). Callers must ensure
+    `prefixes` don't overlap each other (`write_init` rejects that before
+    calling in) — `_walk` assumes at most one prefix ever matches a given
+    absolute path.
 
     `schema_mount_prefix` is the base version's full absolute mount path
     (`APIVER_ROOT_PREFIX + f"{base_name}/"`) — known at init time since
@@ -377,19 +391,19 @@ def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str, base_
     collected and reported together (ticket 02 recommendation #5).
 
     Always returns at least a schema and a docs plan (ticket #51): if
-    nothing under `prefix` classified as either, a default is appended —
+    nothing under any `prefixes` classified as either, a default is appended —
     `register('schema/', ...)`/`register('docs/', ...)`, the same keys
     `mount` always uses for a freshly-authored version — rather than leaving
     the Base Version to ship without one just because nothing pre-existing
     was there to discover and rename. This is also what makes a genuinely
-    route-less project (nothing at all under `prefix`) still produce a
+    route-less project (nothing at all under `prefixes`) still produce a
     valid registry instead of a "nothing discovered" refusal.
     """
     endpoints: list[_Endpoint] = []
     diagnostics: list[str] = []
     _walk(
         root_patterns,
-        prefix=prefix,
+        prefixes=prefixes,
         ancestor_prefix="",
         depth=0,
         endpoints=endpoints,
@@ -421,7 +435,8 @@ def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str, base_
         if cls is None:
             diagnostics.append(f"basename {basename!r} has no recoverable handler class.")
             continue
-        ancestor_relative = _relative(prefix, group[0].ancestor_prefix)
+        matched_prefix = group[0].matched_prefix
+        ancestor_relative = _relative(matched_prefix, group[0].ancestor_prefix)
         if "(?P<" in ancestor_relative or "<" in ancestor_relative:
             diagnostics.append(
                 f"basename {basename!r} is mounted under a parameterized parent path "
@@ -431,7 +446,7 @@ def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str, base_
             )
             continue
 
-        router_prefix = _derive_router_prefix(prefix, basename, group, diagnostics)
+        router_prefix = _derive_router_prefix(matched_prefix, basename, group, diagnostics)
         if router_prefix is None:
             continue
 
@@ -470,7 +485,7 @@ def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str, base_
 
     if len(schema_endpoints) > 1:
         diagnostics.append(
-            f"{len(schema_endpoints)} drf-spectacular schema views found under prefix {prefix!r} "
+            f"{len(schema_endpoints)} drf-spectacular schema views found under prefixes {prefixes!r} "
             f"({', '.join(sorted(e.path for e in schema_endpoints))}) — init can only auto-wire a "
             "single schema endpoint per version (ticket #40). Remove the extras, or register them by "
             "hand with Version.schema_view(prefix=...)."
@@ -492,7 +507,7 @@ def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str, base_
                 "regex (ticket 02 §3.5). Convert it to path() first, or register it by hand."
             )
         else:
-            key = _relative(prefix, endpoint.path)
+            key = _relative(endpoint.matched_prefix, endpoint.path)
             groups[key] = [endpoint]
             plans.append(
                 RegistrationPlan(
@@ -525,7 +540,7 @@ def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str, base_
             continue
         module, symbol = resolved
 
-        key = _relative(prefix, endpoint.path)
+        key = _relative(endpoint.matched_prefix, endpoint.path)
         # Qualified, not the bare discovered name: the same collision this
         # function's docstring explains for the schema route itself applies
         # here too — reused verbatim, "docs" would collide with the
@@ -550,7 +565,7 @@ def discover(root_patterns: Any, *, prefix: str, schema_mount_prefix: str, base_
             )
             continue
 
-        key = _relative(prefix, endpoint.path)
+        key = _relative(endpoint.matched_prefix, endpoint.path)
         if endpoint.cls is not None:
             resolved = _resolve_class_symbol(endpoint.cls, endpoint.callback, endpoint.path, diagnostics)
         else:
@@ -1024,7 +1039,7 @@ def write_mount(version_name: str, *, from_version: str) -> tuple[Path, Path]:
     return registry_path, aggregation_path
 
 
-def write_init(base: str, *, prefix: str | None) -> tuple[Path, Path]:
+def write_init(base: str, *, prefix: list[str] | None) -> tuple[Path, Path]:
     """The full `apiver init` flow: resolve where to write, walk the
     live URLconf, classify and verify every in-scope route, then write
     `registry.py` and mount it into the Aggregation Root (ADR 0003 items
@@ -1038,6 +1053,17 @@ def write_init(base: str, *, prefix: str | None) -> tuple[Path, Path]:
     not an ongoing setting: `init` only ever writes `registry.py` once and
     never regenerates it (ADR 0003 item 4), so nothing after this call ever
     needs to read it again.
+
+    `prefix` (ticket #61) is a list of absolute paths — repeatable on the
+    CLI (`--prefix`, `action="append"`) — since a real pre-existing
+    project's routes are rarely all under one ancestor. Two overlapping
+    values (one a prefix of the other, including two identical values) are
+    rejected outright: there is no unambiguous way to tell which one a
+    route between them belongs to, and the fail-closed posture this module
+    takes everywhere else (ticket 02 recommendation #5) applies here too —
+    refuse and write nothing rather than guess. `APIVER_ROOT_PREFIX` itself
+    stays single-valued regardless — it's a mount-time fact (the one
+    absolute path every version mounts under), not a discovery-scope one.
 
     Returns `(registry_path, aggregation_path)`.
     """
@@ -1065,12 +1091,22 @@ def write_init(base: str, *, prefix: str | None) -> tuple[Path, Path]:
     # — is a distinct fact from APIVER_ROOT_PREFIX, but defaults to it: the
     # common case is that a project's whole pre-existing API already lives
     # under the same absolute path apiver will keep mounting versions at.
-    if prefix is None:
-        prefix = root_prefix
-    # Discovered absolute paths never carry a leading "/" — path()/router
-    # declarations don't either — so a user-typed "/api/" is normalized the
-    # same as "api/".
-    prefix = prefix.lstrip("/")
+    if not prefix:
+        prefixes = [root_prefix]
+    else:
+        # Discovered absolute paths never carry a leading "/" —
+        # path()/router declarations don't either — so a user-typed
+        # "/api/" is normalized the same as "api/".
+        prefixes = [p.lstrip("/") for p in prefix]
+
+    for i, a in enumerate(prefixes):
+        for b in prefixes[i + 1 :]:
+            if _overlaps(a, b):
+                raise InitError(
+                    f"--prefix {a!r} and {b!r} overlap — one is a prefix of the other (or they're "
+                    "identical), so it's ambiguous which routes between them belong to which. Pass "
+                    "only the outer one, or narrow them so neither contains the other."
+                )
 
     module_path = f"{root_dir}.{base_name}"
     target_dir = _resolve_target_dir(module_path)
@@ -1093,7 +1129,7 @@ def write_init(base: str, *, prefix: str | None) -> tuple[Path, Path]:
     mount_prefix = root_prefix + f"{display_name}/"
     root_urlconf = import_module(settings.ROOT_URLCONF)
     result = discover(
-        root_urlconf.urlpatterns, prefix=prefix, schema_mount_prefix=mount_prefix, base_name=base_name
+        root_urlconf.urlpatterns, prefixes=prefixes, schema_mount_prefix=mount_prefix, base_name=base_name
     )
     if result.diagnostics:
         raise InitError("\n".join(f"- {message}" for message in result.diagnostics))

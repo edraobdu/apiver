@@ -78,10 +78,11 @@ APIVER_VERSIONS = ["v1"]  # hand-maintained list of Live version names
 `reference/`'s whole pre-existing API already lives under `api/`, which is why no `--prefix`
 override is needed below — `APIVER_ROOT_PREFIX` already names it. (`APIVER_ROOT_PREFIX` is only
 about where the *new* versioned surface mounts, not where existing code lives today — if those
-differ, `apiver init --prefix <path>` says so explicitly. `--prefix` is a single path; a project
-with routes scattered across unrelated prefixes needs one `init` run against the largest tree plus
-hand-written `register()` calls for the rest — multi-prefix support is
-[#61](https://github.com/edraobdu/apiver/issues/61).)
+differ, `apiver init --prefix <path>` says so explicitly. `--prefix` is repeatable
+(`--prefix api/ --prefix legacy/`) for a project whose routes are scattered across several
+unrelated ancestors — every route under any of them is adopted together, keyed relative to
+whichever prefix it fell under. Overlapping values, including passing the same one twice, are
+refused rather than silently deduped.)
 
 `apiver` is a standalone CLI, not a `manage.py` subcommand, so it needs Django settings resolved
 one way or another. Rather than passing `--settings` (or exporting `DJANGO_SETTINGS_MODULE`) on

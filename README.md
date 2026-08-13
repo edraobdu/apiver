@@ -579,7 +579,7 @@ then `DJANGO_SETTINGS_MODULE`, then `[tool.apiver].django_settings_module` in `p
 
 | Command | What it does |
 | --- | --- |
-| `apiver init --base NAME [--prefix PATH]` | Adopts an existing project's routes as the base version named `NAME`, or scaffolds a route-less one — moves nothing. |
+| `apiver init --base NAME [--prefix PATH ...]` | Adopts an existing project's routes as the base version named `NAME`, or scaffolds a route-less one — moves nothing. `--prefix` is repeatable for routes scattered across several unrelated ancestors. |
 | `apiver mount NAME --from PARENT` | Scaffolds a new authored version's `registry.py`, derived from `PARENT`, with schema/docs already wired. |
 | `apiver alias NAME --from VERSION` | Declares a movable name pointing at an already-mounted version. |
 | `apiver manifest [--check]` | Writes `apiver.toml`, a committed snapshot of every version's resolution table; `--check` exits non-zero if it's stale, the same idiom as `makemigrations --check`. |
@@ -629,10 +629,6 @@ $ pip install git+https://github.com/edraobdu/apiver.git
 **0.1 is the complete tool**, not a minimal one — everything below ships before the first tag, not
 after it:
 
-- **[Multiple `--prefix` values for `apiver init`](https://github.com/edraobdu/apiver/issues/61).**
-  Adopting a project whose routes are scattered across several unrelated roots (`api/`, `legacy/`,
-  `internal-api/`) shouldn't need one `init` run per root plus hand-written `register()` calls for
-  everything outside the biggest tree.
 - **[A version-wide config layer](https://github.com/edraobdu/apiver/issues/57).** Still a decision
   ticket, not a build ticket: whether `Version` should support version-wide configuration
   (`permission_classes`, authentication) that forwards to every route without an explicit `override()`

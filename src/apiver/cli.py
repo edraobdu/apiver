@@ -55,7 +55,7 @@ def _resolve_django_settings_module(settings_flag: str | None) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _cmd_init(*, base: str, prefix: str | None, manifest_path: str | None) -> int:
+def _cmd_init(*, base: str, prefix: list[str] | None, manifest_path: str | None) -> int:
     from .drf.init import InitError, write_init
 
     try:
@@ -311,10 +311,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     init_parser.add_argument(
         "--prefix",
+        action="append",
         default=None,
         help="Only routes under this absolute path are adopted (e.g. api/) — excludes admin/, "
-        "third-party auth urls, and anything else outside the API surface. Defaults to "
-        "APIVER_ROOT_PREFIX when unset.",
+        "third-party auth urls, and anything else outside the API surface. Repeatable "
+        "(--prefix api/ --prefix legacy/) for routes scattered under multiple, non-overlapping "
+        "ancestors; overlapping values are rejected. Defaults to [APIVER_ROOT_PREFIX] when unset. "
+        "Distinct from APIVER_ROOT_PREFIX, which stays single-valued no matter how many --prefix "
+        "values you pass — it's the one absolute path every version mounts under.",
     )
     init_parser.add_argument(
         "--manifest-path",

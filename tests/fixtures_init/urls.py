@@ -33,4 +33,8 @@ urlpatterns = [
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
     # Outside --prefix "api/" — proves the prefix filter excludes it.
     path("status/", views.HealthzView.as_view(), name="status"),
+    # A second, unrelated ancestor with no shared prefix with "api/" short of
+    # ""  — proves --prefix is repeatable and unions non-overlapping trees
+    # (ticket #61).
+    path("legacy/archive/", views.HealthzView.as_view(), name="legacy-archive"),
 ]
