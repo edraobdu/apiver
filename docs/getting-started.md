@@ -54,8 +54,8 @@ Add it to `INSTALLED_APPS` — it has no models, but its checks won't run until 
 
 ```python
 # settings.py, anywhere after INSTALLED_APPS
-APIVER_ROOT_PREFIX = "api/"    # where every version mounts, in the URL
-APIVER_VERSIONS = ["v1"]       # which versions are live
+APIVER_ROOT_PREFIX = "api/"  # where every version mounts, in the URL
+APIVER_VERSIONS = ["v1"]  # which versions are live
 ```
 
 apiver's own generated code lives under `apiversions/` by default — deliberately not `api`, so it can
@@ -249,7 +249,7 @@ Exercised against a migrated dev database:
 {'id': 1, 'username': 'ada', 'email': 'ada@example.com', 'display_name': 'Ada Lovelace', 'is_active': True}
 >>> c.get("/api/v2/legacy-invoices/").status_code
 404
->>> c.get("/api/v1/legacy-invoices/").status_code   # v1 unaffected throughout
+>>> c.get("/api/v1/legacy-invoices/").status_code  # v1 unaffected throughout
 200
 ```
 
