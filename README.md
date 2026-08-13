@@ -25,9 +25,9 @@ the parent's actual handler objects — not copies of them.
 Shipping a breaking API change — drop a field, remove a resource, change a type — without breaking the
 clients still calling the old shape has three bad answers today: copy the API into a `v2/` package and
 drag the unchanged 95% along with it; reach for DRF's `URLPathVersioning`, which sets `request.version`
-and leaves composition as `if request.version == "v2":` branches smeared through the codebase; or reach
-for a library — several have flatlined over the years, and none of the maintained ones do real version
-composition either.
+and leaves composition as `if request.version == "v2":` branches smeared through the codebase; or promise
+to only ever add fields and never remove one, until the response body is an archaeology dig of
+`status_v2`/`status_string`/`status_do_not_use` that nobody remembers the meaning of.
 
 None of them let you say *"V2 is V1, except payments returns decimal strings and legacy-invoices is
 gone"* and get a complete, correctly-documented V2 surface out of it. And none of them require your
@@ -39,9 +39,8 @@ to know what your *next* version changes. **[Read the full problem statement →
 - **A second complete API surface for the cost of one field.** One `override()` call, and
   `GET /api/v2/users/` still works — V2 never mentioned users, and the other 95% of the surface was
   never touched.
-- **Adoption with nothing to reorganize first.** `apiver init` wraps your existing, working project as
-  it is — no file moves, no big-bang migration to schedule. The first breaking change is the only time
-  you touch apiver again.
+- **`apiver init` wraps your project exactly as it is.** No file moves, no big-bang migration to
+  schedule. The first breaking change is the only time you touch apiver again.
 - **Deltas that are ordinary, inspectable Python.** An override is a subclass. No DSL, no parallel
   object model, no migration-chain classes to learn — if you can read a Django class hierarchy, you can
   read a delta.
@@ -51,14 +50,15 @@ to know what your *next* version changes. **[Read the full problem statement →
   headers and enforces `410 Gone` on the wall clock — no deploy has to land on the date.
 - **Tooling that answers "what does v3 actually serve?"** `apiver versions` and a committed
   `apiver.toml` turn that from an archaeology project into a command.
-- **An honest boundary, not a hidden one.** Route composition works for anything routable. Schema
-  reasoning works only as far as drf-spectacular can see.
-  **[More on that boundary →](https://apiver.readthedocs.io/supported/)**
+- **No pretending it can see what it can't.** A `SerializerMethodField`'s actual output, or a changed
+  error-response shape, won't show up in a schema diff — `apiver diff` says so out loud instead of
+  quietly missing it.
+  **[See exactly where the line is →](https://apiver.readthedocs.io/supported/)**
 
 ## A taste of it
 
 ```python
-# api/v1/registry.py — your existing code, untouched
+# apiversions/v1/registry.py — your existing code, untouched
 from apiver.drf import Version
 from products.views import ProductViewSet
 
@@ -67,8 +67,8 @@ v1.register("products", ProductViewSet, basename="products")
 ```
 
 ```python
-# api/v2/registry.py — the whole delta
-from api.v1.registry import v1
+# apiversions/v2/registry.py — the whole delta
+from apiversions.v1.registry import v1
 from products.views import ProductViewSetV2
 
 v2 = v1.derive("v2")
