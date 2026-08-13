@@ -94,10 +94,10 @@ that's what makes squashing a long delta chain mechanical rather than risky.
 
 ## Status and roadmap
 
-apiver is pre-1.0 and not yet on PyPI. The mechanism, verbs, and CLI documented across this site exist
-and are covered by tests — none of it is a design document describing something aspirational. What
-isn't settled yet is everything below: expect the public API to keep moving until a tagged `0.1`
-release, and pin an exact commit if you adopt apiver before then.
+apiver is pre-1.0. The mechanism, verbs, and CLI documented across this site exist and are covered by
+tests — none of it is a design document describing something aspirational. What isn't settled yet is
+everything below: expect the public API to keep moving until a tagged `0.1` release, and pin an exact
+version if you adopt apiver before then.
 
 **0.1 is the complete tool**, not a minimal one — everything below ships before the first tag, not after
 it:
