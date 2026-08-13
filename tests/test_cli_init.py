@@ -131,6 +131,76 @@ def test_init_writes_registry_py_the_aggregation_root_and_the_manifest(tmp_path)
     assert before - after == set()
 
 
+def test_init_accepts_multiple_prefix_values_and_unions_scattered_routes(tmp_path):
+    """ticket #61: a real pre-existing project's routes are rarely all
+    under one ancestor. Passing --prefix more than once unions the walk
+    across every one of them, keying each discovered route relative to
+    whichever prefix it fell under."""
+    manifest_target = tmp_path / "apiver.toml"
+
+    result = _run(
+        "--base", "v1", "--prefix", "api/", "--prefix", "legacy/", "--manifest-path", str(manifest_target)
+    )
+
+    assert result.returncode == 0, result.stderr
+    source = (GENERATED_ROOT / "registry.py").read_text()
+
+    # Still picks up everything under "api/", exactly as the single-prefix case.
+    assert "v1.register('widgets', WidgetViewSet, basename='widgets')" in source
+    assert "v1.register('healthz/', HealthzView, name='healthz')" in source
+    # And the scattered route under the second, unrelated ancestor "legacy/",
+    # keyed relative to *that* prefix rather than "api/".
+    assert "v1.register('archive/', HealthzView, name='legacy-archive')" in source
+    # "status/" sits outside both --prefix values and must still be excluded.
+    assert "name='status'" not in source
+
+    manifest = tomllib.loads(manifest_target.read_text())
+    routes = manifest["versions"]["v1"]["routes"]
+    assert len(routes) == 13  # the single-prefix 12 (see above) + legacy/archive/
+
+
+def test_init_rejects_overlapping_prefix_values(tmp_path):
+    """ticket #61's open question, settled: overlapping --prefix values are
+    ambiguous (it's unclear which one a route between them belongs to), so
+    init refuses outright and writes nothing, rather than silently
+    deduping."""
+    result = _run(
+        "--base",
+        "v1",
+        "--prefix",
+        "api/",
+        "--prefix",
+        "api/v1/",
+        "--manifest-path",
+        str(tmp_path / "apiver.toml"),
+    )
+
+    assert result.returncode != 0
+    assert "overlap" in result.stderr
+    assert not GENERATED_ROOT.exists()
+    assert not GENERATED_AGGREGATION_ROOT.exists()
+
+
+def test_init_rejects_duplicate_prefix_values(tmp_path):
+    """Passing the same --prefix twice is a degenerate overlap (equal
+    strings satisfy the same startswith check) — refused for the same
+    reason as any other overlap."""
+    result = _run(
+        "--base",
+        "v1",
+        "--prefix",
+        "api/",
+        "--prefix",
+        "api/",
+        "--manifest-path",
+        str(tmp_path / "apiver.toml"),
+    )
+
+    assert result.returncode != 0
+    assert "overlap" in result.stderr
+    assert not GENERATED_ROOT.exists()
+
+
 def test_init_writes_a_route_less_base_version_when_nothing_is_discovered(tmp_path):
     """A greenfield project — or one adopted with a --prefix that matches
     nothing at all — is not a failure (ticket #51): `init` still produces a
