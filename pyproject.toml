@@ -2,6 +2,7 @@
 name = "apiver"
 version = "0.0.1"
 description = "Define API versions as deltas, not duplicates."
+readme = "README.md"
 requires-python = ">=3.12,<3.15"
 license = "MIT"
 license-files = ["LICENSE"]
