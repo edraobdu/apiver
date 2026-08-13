@@ -6,6 +6,7 @@
 [![codecov](https://codecov.io/gh/edraobdu/apiver/branch/master/graph/badge.svg)](https://codecov.io/gh/edraobdu/apiver)
 [![Docs](https://readthedocs.org/projects/apiver/badge/?version=latest)](https://apiver.readthedocs.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/apiver.svg)](https://pypi.org/project/apiver/)
 
 apiver is a Django REST Framework library for composing complete API versions from deltas. Your
 existing code becomes the **base version**, exactly where it already lives; every later version
