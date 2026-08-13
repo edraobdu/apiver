@@ -1,0 +1,63 @@
+site_name: apiver
+site_description: Define API versions as deltas, not duplicates.
+site_url: https://apiver.readthedocs.io/
+repo_url: https://github.com/edraobdu/apiver
+repo_name: edraobdu/apiver
+edit_uri: edit/master/docs/
+
+# ADRs are dev-facing design history, not published-site content (see Philosophy/What If...?) —
+# they stay browsable in the repo and linked from CONTRIBUTING.md, never built into the site.
+exclude_docs: |
+  adr/*
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - content.code.copy
+    - content.action.edit
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Philosophy: philosophy.md
+  - What If...?: what-if.md
+  - Guides:
+      - Version lifecycle: guides/version-lifecycle.md
+      - Version-aware links: guides/version-aware-links.md
+      - Version schemes: guides/version-schemes.md
+  - What's Supported: supported.md
+  - Reference: reference.md
+  - Glossary: glossary.md

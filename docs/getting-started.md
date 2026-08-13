@@ -1,6 +1,13 @@
 # Adopting apiver into an existing project
 
-Walks a project that already has a working DRF API through adopting apiver: installing it,
+Nothing below assumes a clean starting point. Whatever your project's API looks like today — one
+version or a dozen, a consistent scheme or several abandoned ones, hand-rolled `if request.version`
+branches you'd rather not think about — apiver doesn't ask you to sort any of that out first. It adopts
+your project's current, live routes as the **Base Version**, exactly where they already are, and from
+that point on your *next* version is the first one apiver actually manages. Everything before it stays
+exactly as it was.
+
+This walks a project that already has a working DRF API through adopting apiver: installing it,
 running `apiver init` to adopt the existing API as the Base Version, then authoring and mounting a
 second version as a Delta. Every step below was actually run against `reference/` (issue #22) —
 commands, output and generated code are real, not illustrative. `reference/` itself is kept out of
