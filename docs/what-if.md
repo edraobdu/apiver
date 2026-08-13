@@ -6,19 +6,19 @@ answer is "not yet" or "that's a real boundary."
 ## What if my project already has years of tangled, inconsistent versioning?
 
 Nothing about apiver assumes a clean starting point. `apiver init` adopts your project's current, live
-routes as the **Base Version** exactly where they already are — one hand-rolled version or a dozen, a
-single consistent scheme or three abandoned attempts at one, `if request.version` branches you'd rather
-not read again. None of that has to be sorted out first. apiver only needs to know what your *next*
-version changes; everything before it stays exactly as messy as it already was, still serving, still
-untouched.
+routes as the **Base Version** exactly where they already are — one hand-rolled version or a dozen
+(`v1` through `v30`, no consistent pattern), a single scheme or three abandoned attempts at one,
+`if request.version` branches you'd rather not read again. apiver never inspects or cares how you got
+there, because it was never tracking any of it: the Base Version `apiver init --base ...` creates is the
+*first* version its name-validation ever sees.
 
-That includes the naming scheme itself. Sequential `v1`/`v2` names, `semver`, date-based — see
-[Version schemes](guides/version-schemes.md) — is a project-wide setting, so it isn't free to change on
-a whim while old-scheme versions are still live (the very next `manage.py check` would reject them
-against the new scheme). But once those old versions are archived, your next version really can be the
-first one under a scheme you actually chose on purpose, instead of whatever your project happened to
-drift into. Either way, the very next version can be the first one apiver actually manages — the
-project's whole prior history doesn't have to become "correct" retroactively for that to be true.
+That makes the naming scheme itself a genuinely free choice at the moment you adopt apiver — set
+`APIVER_VERSION_SCHEME` to `semver`, `date`, or leave it `sequential` before running `apiver init`,
+entirely independent of whatever ad-hoc numbering your project used before. Your years of `v1`...`v30`
+never have to become "correct" retroactively; the Base Version apiver creates today simply *is* the
+first name that scheme has ever validated. (Changing the scheme again later, once apiver is already
+tracking versions under it, is a different and more constrained operation — see
+[Version schemes](guides/version-schemes.md).)
 
 ## What if I already have an `/api/` folder and routes I don't want to touch?
 
