@@ -3,10 +3,13 @@
 **Define API versions as deltas, not duplicates.**
 
 [![CI](https://github.com/edraobdu/apiver/actions/workflows/ci.yml/badge.svg)](https://github.com/edraobdu/apiver/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/edraobdu/apiver/branch/master/graph/badge.svg)](https://codecov.io/gh/edraobdu/apiver)
+![Codecov](https://img.shields.io/codecov/c/gh/edraobdu/apiver?logo=codecov)
 [![Docs](https://readthedocs.org/projects/apiver/badge/?version=latest)](https://apiver.readthedocs.io/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/apiver.svg)](https://pypi.org/project/apiver/)
+![PyPI - License](https://img.shields.io/pypi/l/apiver)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/apiver?logo=python&logoColor=blue)
+![PyPI Version](https://img.shields.io/pypi/v/apiver)
+
+
 
 apiver is a Django REST Framework library for composing complete API versions from deltas. Your
 existing code becomes the **base version**, exactly where it already lives; every later version
