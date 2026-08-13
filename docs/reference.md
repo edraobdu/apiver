@@ -12,7 +12,7 @@ then `DJANGO_SETTINGS_MODULE`, then `[tool.apiver].django_settings_module` in `p
 
 | Command | What it does |
 | --- | --- |
-| `apiver init --base NAME [--prefix PATH ...]` | Adopts an existing project's routes as the base version named `NAME`, or scaffolds a route-less one — moves nothing. `--prefix` is repeatable for routes scattered across several unrelated ancestors. |
+| `apiver init --base NAME [--prefix PATH ...]` | Adopts an existing project's routes as the base version named `NAME`, or scaffolds a route-less one — moves nothing. `--prefix` is repeatable for routes scattered across several unrelated ancestors. Refuses loudly, writing nothing and naming every offending route, on one it can't classify: a ViewSet with no explicit `basename=`, a handler with no importable symbol, `re_path()` instead of `path()`, a namespaced `include()` or `i18n_patterns()` at the root, or more than one drf-spectacular schema view under the prefix. Register those by hand instead. |
 | `apiver mount NAME --from PARENT` | Scaffolds a new authored version's `registry.py`, derived from `PARENT`, with schema/docs already wired. |
 | `apiver alias NAME --from VERSION` | Declares a movable name pointing at an already-mounted version. |
 | `apiver manifest [--check]` | Writes `apiver.toml`, a committed snapshot of every version's resolution table; `--check` exits non-zero if it's stale, the same idiom as `makemigrations --check`. |

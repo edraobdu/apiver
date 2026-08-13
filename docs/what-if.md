@@ -42,6 +42,19 @@ have. Your existing `reverse()` calls, tests, Celery task paths, and admin regis
 untouched, because the modules they point at haven't moved. See
 [Getting Started](getting-started.md) for the adoption walkthrough end to end.
 
+## What if I need to add a brand-new route after adopting apiver — is `path()` gone for good?
+
+Only inside the versioned surface. Anything that's part of your API — a new resource, a new action, a
+changed field — gets `register()`ed or `override()`n on a `Version` from then on, because that's the one
+place `apiver versions`/`apiver diff` and the generated OpenAPI docs can see it. Everything else in the
+project keeps using `path()`/`include()` exactly as before: `admin/`, health checks, a third-party
+webhook or OAuth callback URL that needs a stable path no version prefix should ever touch. `apiver
+init`/`apiver mount` only ever write inside their own generated Aggregation Root
+(`apiversions/urls.py` by default) — wiring that into your project's actual root `urls.py` with one
+line, `path("", include("apiversions.urls"))`, is something you do by hand, once; apiver never writes
+to that file itself. Nothing routes every URL in the project through apiver's verbs, only the ones you
+actually want versioned.
+
 ## What if my project uses a custom or nested router?
 
 Refused loudly, not silently mishandled. 0.1 composes against `SimpleRouter`/`DefaultRouter` semantics

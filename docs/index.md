@@ -2,30 +2,54 @@
 
 **Define API versions as deltas, not duplicates.**
 
-apiver is a Django REST Framework library for composing complete API versions from deltas. A **base
-version** stays exactly where your existing code already lives; every later **authored version**
-declares only what changed against its parent. Everything untouched resolves back through the chain to
-the same handler objects the parent already uses — not copies of them — so every version presents a
-complete, working API surface without duplicating the 95% of it that didn't change.
+Your existing code becomes the **base version**, exactly where it already lives. Every later version
+declares only what changed against its parent — one `override()` call — and everything else resolves
+straight through to the same handler objects the parent already uses. Not copies. The same objects.
 
 ```mermaid
 flowchart LR
-    subgraph v1["v1 — Base Version"]
-        P1["ProductViewSet"]
-        O1["OrderViewSet"]
-        Pay1["PaymentViewSet"]
-    end
-    subgraph v2["v2 — derives from v1"]
-        Pay2["PaymentViewSetV2\n(override)"]
+    subgraph V1["v1 — Base Version, 30 routes"]
+        direction TB
+        products1["products"]
+        orders1["orders"]
+        payments1["payments"]
+        webhooks1["webhooks"]
+        addresses1["addresses"]
+        rest1["24 more routes"]
+        users1["users"]
     end
 
-    ReqA["GET /api/v2/products/"] -.resolves straight through.-> P1
-    ReqB["GET /api/v2/orders/"] -.resolves straight through.-> O1
-    ReqC["GET /api/v2/payments/"] --> Pay2
+    subgraph V2["v2 — derives from v1, overrides 1 route"]
+        direction TB
+        users2[["users — override()"]]
+    end
+
+    classDef overridden fill:#f4a326,stroke:#8a5a00,color:#1a1200,font-weight:bold;
+    class users2 overridden;
+
+    untouched(["the other 29 v2 requests"]) -. "resolve straight through" .-> products1
+    untouched -.-> orders1
+    untouched -.-> payments1
+    untouched -.-> webhooks1
+    untouched -.-> addresses1
+    untouched -.-> rest1
+
+    changed(["GET /api/v2/users/"]) ==>|"the 1 route v2 actually changes"| users2
 ```
 
-`v2` only ever mentions `payments`. `products` and `orders` were never touched — a `v2` request for
-either resolves to the exact same object `v1` already serves, not a copy of it.
+`v2` mentions exactly one thing: `users`. Every other route — 29 of them, across 6 resources — resolves
+straight through to the exact same `v1` handler objects, untouched.
+
+## Nothing to reorganize first
+
+1. **Install it.** `uv add apiver` (or `pip install apiver`).
+2. **Add two settings.** Where versions mount, and which ones are live.
+3. **Run `apiver init --base v1`.** It reads your existing routes and writes the registry for you.
+4. **Add one line to your root `urls.py`.**
+
+That's it. Your existing API is now also live at `/api/v1/...`, serving the exact same handlers it
+always did — nothing moved, nothing got rewritten. [Walk through it end to end, commands and output
+included →](getting-started.md)
 
 ## The problem
 
@@ -43,9 +67,10 @@ is bad in a specific way:
   codebase instead of declared in one place. Sometimes it's dressed up as a converter function between
   versions instead of a branch; it's the same disease wearing a different hat — logic that decides what
   changed, living anywhere except the one place a reviewer would think to look.
-- **Reach for a library.** Several DRF versioning packages have flatlined over the years, and none of
-  the maintained ones do real version composition — they set `request.version` and stop, leaving
-  composition as an exercise for the developer.
+- **Promise to only ever add, never remove.** No branch, no override, no version — just pile
+  `status_v2`, `status_string`, and `status_do_not_use` next to the field nobody had the nerve to
+  schedule a real removal for. Two years in, the response body is an archaeology dig, and no client
+  developer can tell you which field they're actually supposed to read.
 
 None of these give you a way to say *"V2 is V1, except payments returns decimal strings and
 legacy-invoices is gone"* and get a **complete, correctly-documented V2 API surface** out of it — nor do
@@ -75,11 +100,10 @@ that's what makes squashing a long delta chain mechanical rather than risky.
 ## What you get
 
 - **A second complete API surface for the cost of one field.** One `override()` call, and
-  `GET /api/v2/users/` still works — V2 never mentioned users, and the other 95% of the surface was
-  never touched.
-- **Adoption with nothing to reorganize first.** `apiver init` wraps your existing, working project as
-  it is — no file moves, no big-bang migration to schedule. The first breaking change is the only time
-  you touch apiver again.
+  `GET /api/v2/products/` still works — V2 never mentioned products, and the other 29 routes were never
+  touched.
+- **`apiver init` wraps your project exactly as it is.** No file moves, no big-bang migration to
+  schedule. The first breaking change is the only time you touch apiver again.
 - **Deltas that are ordinary, inspectable Python.** An override is a subclass. No DSL, no parallel
   object model, no migration-chain classes to learn — if you can read a Django class hierarchy, you can
   read a delta.
@@ -89,8 +113,9 @@ that's what makes squashing a long delta chain mechanical rather than risky.
   headers and enforces `410 Gone` on the wall clock — no deploy has to land on the date.
 - **Tooling that answers "what does v3 actually serve?"** `apiver versions` and a committed
   `apiver.toml` turn that from an archaeology project into a command.
-- **An honest boundary, not a hidden one.** Route composition works for anything routable. Schema
-  reasoning works only as far as drf-spectacular can see. [More on that boundary](supported.md).
+- **No pretending it can see what it can't.** A `SerializerMethodField`'s actual output, or a changed
+  error-response shape, won't show up in a schema diff — `apiver diff` says so out loud instead of
+  quietly missing it. [See exactly where the line is →](supported.md).
 
 ## Status and roadmap
 
