@@ -5,6 +5,11 @@ description = "Define API versions as deltas, not duplicates."
 requires-python = ">=3.12,<3.15"
 license = "MIT"
 license-files = ["LICENSE"]
+classifiers = [
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
 dependencies = [
     "django~=5.2",
     "djangorestframework~=3.18",
