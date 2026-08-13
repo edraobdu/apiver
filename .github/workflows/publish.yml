@@ -1,0 +1,44 @@
+name: Publish to PyPI
+
+# Triggered by publishing a GitHub Release (tag it vX.Y.Z first, then draft the
+# Release from that tag). Nothing here runs on an ordinary push or PR — a release
+# to PyPI is a deliberate, human-triggered action, never a side effect of merging.
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    name: Build sdist and wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Build
+        run: uv build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # Required for PyPI trusted publishing (OIDC) — no API token stored anywhere.
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
