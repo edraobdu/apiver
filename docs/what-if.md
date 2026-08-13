@@ -20,6 +20,18 @@ first name that scheme has ever validated. (Changing the scheme again later, onc
 tracking versions under it, is a different and more constrained operation — see
 [Version schemes](guides/version-schemes.md).)
 
+## What if I use `semver`/`date` and the generated class names break PEP8?
+
+They do, and on purpose. Python identifiers can't contain dots or hyphens, so a `semver` slug spells
+`v1.2.3` as `v1_2_3`, and the version-suffix check (`register()`/`override()`'s `_check_suffix`) that
+traces a class back to its Version needs that exact slug, uppercased, in the class name — `v1_2_3`
+requires `V1_2_3` somewhere in the name, e.g. `UserViewSetV1_2_3`. There's no rule anywhere that a class
+name must be strict PascalCase — that's convention, not syntax — but it's still worth knowing going in
+if `V1_2_3` reads wrong to you. See [Version schemes](guides/version-schemes.md#class-names-under-semverdate)
+for the full mechanics, including why versioning at patch granularity is usually the wrong instinct
+here — a `semver` project generally only needs a new `Version` (and a new suffixed class) at a breaking,
+major bump, not on every release.
+
 ## What if I already have an `/api/` folder and routes I don't want to touch?
 
 `APIVER_ROOT_DIR` — the package apiver's own generated files live under — defaults to `"apiversions"`,
