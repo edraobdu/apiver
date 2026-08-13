@@ -1,11 +1,13 @@
 name: Publish to PyPI
 
-# Triggered by publishing a GitHub Release (tag it vX.Y.Z first, then draft the
-# Release from that tag). Nothing here runs on an ordinary push or PR — a release
-# to PyPI is a deliberate, human-triggered action, never a side effect of merging.
+# Triggered either by publishing a GitHub Release (tag it vX.Y.Z first, then draft
+# the Release from that tag) or by running this workflow manually. Nothing here
+# runs on an ordinary push or PR — a release to PyPI is a deliberate, human-
+# triggered action, never a side effect of merging.
 on:
   release:
     types: [published]
+  workflow_dispatch: {}
 
 jobs:
   build:

@@ -79,16 +79,14 @@ unchanged, straight through to V1. **[Walk through the full adoption →](https:
 
 ## Installation
 
-apiver isn't on PyPI yet — install it straight from GitHub until it is:
-
 ```console
-$ uv add git+https://github.com/edraobdu/apiver.git
+$ uv add apiver
 ```
 
 or with `pip`:
 
 ```console
-$ pip install git+https://github.com/edraobdu/apiver.git
+$ pip install apiver
 ```
 
 ## Requirements

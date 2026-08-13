@@ -45,14 +45,12 @@ then `DJANGO_SETTINGS_MODULE`, then `[tool.apiver].django_settings_module` in `p
 
 ## Installation
 
-apiver isn't on PyPI yet — install it straight from GitHub until it is:
-
 ```console
-$ uv add git+https://github.com/edraobdu/apiver.git
+$ uv add apiver
 ```
 
 or with `pip`:
 
 ```console
-$ pip install git+https://github.com/edraobdu/apiver.git
+$ pip install apiver
 ```
