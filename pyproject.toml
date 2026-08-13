@@ -21,6 +21,9 @@ dev = [
     "pytest-django>=4.9",
     "ruff>=0.14",
 ]
+docs = [
+    "mkdocs-material>=9.7.7",
+]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "tests.settings"
