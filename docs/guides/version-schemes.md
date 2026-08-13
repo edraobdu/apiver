@@ -26,6 +26,29 @@ making it a chronological point. `apiver alias`'s own name is exempt from scheme
 human label (`stable`, `latest`), not a version point — but its `--from` target is still validated as a
 real, scheme-conforming version.
 
+## Class names under `semver`/`date`
+
+`_check_suffix` traces every registered class back to the Version that owns it by requiring the
+Version's slug, uppercased, as a substring of the class name — `Version("v1_2_3")` requires `V1_2_3`
+somewhere in the name, e.g. `UserViewSetV1_2_3`; `Version("d2026_08_11")` requires `D2026_08_11`, e.g.
+`UserViewSetD2026_08_11`. That's not idiomatic PascalCase, and it isn't meant to be: dots and hyphens
+are illegal in Python identifiers, so the slug itself already stands in underscores for the Display
+Name's dots, and the class name just carries that same slug forward. There's no separate, friendlier
+suffix convention to opt into — the substring check needs the literal slug, unambiguously, so
+drf-spectacular never collides two same-named classes from different versions into one schema
+component.
+
+## How many `Version`s does a `semver` project actually need?
+
+Not one per release. A `Version` exists to hold a delta that has to be served *alongside* the version
+it derives from — that's what a route resolving differently per client actually requires. A semver
+minor or patch bump is backward-compatible by definition, so there's nothing to dual-serve: it's an
+ordinary code change to the existing Base Version (or whichever Version already owns that code), no
+`register()`/`override()`, no new module, no new suffixed class. Reserve minting a new `Version` — and
+the class-naming ceremony that comes with it — for the major bumps that actually break the served
+shape, e.g. `v1_0_0` → `v2_0_0`. A project versioning at patch granularity inside apiver is usually a
+sign the change didn't need a new `Version` at all.
+
 ## Choosing a scheme at adoption time
 
 `APIVER_VERSION_SCHEME` is a genuinely free choice the moment you adopt apiver, regardless of how your
