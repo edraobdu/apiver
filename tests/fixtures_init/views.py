@@ -56,3 +56,18 @@ class WebhookViewSet(viewsets.ViewSet):
 
     def retrieve(self, request, pk=None):
         return Response({"id": pk})
+
+
+class ChildViewSet(viewsets.ViewSet):
+    """A nested resource, registered at a prefix with the parent's lookup
+    group embedded directly in it — no router library, no ancestor
+    include() carrying the parameterized segment. Used by
+    tests/fixtures_init/urls_nested.py to regression-test init's discovery
+    of this shape (bug: _strip_anchors corrupting DRF's default
+    `[^/.]+` lookup regex into `[/.]+`)."""
+
+    def list(self, request, parent_pk=None):
+        return Response({"results": [], "parent_pk": parent_pk})
+
+    def retrieve(self, request, parent_pk=None, pk=None):
+        return Response({"id": pk, "parent_pk": parent_pk})

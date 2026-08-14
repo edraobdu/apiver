@@ -8,7 +8,9 @@ project) rather than a copied tmp_path tree, so every test that writes them
 cleans up again — see `_clean_generated_root`.
 """
 
+import importlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -434,3 +436,59 @@ def test_init_uses_display_name_in_generated_urls_under_date_scheme(tmp_path):
 def test_unknown_init_invocation_is_rejected():
     result = _run("--not-a-real-flag")
     assert result.returncode != 0
+
+
+def test_init_adopts_a_nested_resource_with_a_correct_lookup_regex(tmp_path):
+    """Regression test: a nested resource whose parent lookup group is
+    embedded in the router's own prefix (no router library, no ancestor
+    include() carrying the parameterized segment — tests.fixtures_init.
+    urls_nested) must be discovered and adopted with DRF's lookup regex
+    intact.
+
+    `_strip_anchors` used to `.replace("^", "")` globally over the
+    concatenated ancestor+declared text, which also strips the `^` inside
+    DRF's default `[^/.]+` lookup regex the moment it's embedded in a
+    prefix (nesting) rather than only ever appearing in the detail route's
+    auto-appended, separately-discarded lookup segment (the ordinary,
+    non-nested case, which never exercised this). That silently generated
+    `'parents/(?P<parent_pk>[/.]+)/children'` — a regex that can only ever
+    match a parent_pk made entirely of slashes and dots, i.e. none — so
+    every real request 404s despite `init` reporting success.
+    """
+    generated_root = FIXTURE_ROOT / "api_nested" / "v1"
+    generated_aggregation_root = FIXTURE_ROOT / "api_nested" / "urls.py"
+    try:
+        result = _run(
+            "--base",
+            "v1",
+            "--prefix",
+            "",
+            "--manifest-path",
+            str(tmp_path / "apiver.toml"),
+            settings="tests.fixtures_init.settings_nested",
+        )
+
+        assert result.returncode == 0, result.stderr
+        source = (generated_root / "registry.py").read_text()
+
+        # The bug: this used to read "parents/(?P<parent_pk>[/.]+)/children".
+        assert (
+            "v1.register('parents/(?P<parent_pk>[^/.]+)/children', ChildViewSet, "
+            "basename='parent-children')" in source
+        )
+        assert "[/.]+" not in source
+
+        # Prove it's not just cosmetic: the generated registry actually
+        # resolves a real nested request end to end.
+        importlib.invalidate_caches()
+        registry = importlib.import_module("tests.fixtures_init.api_nested.v1.registry")
+        table = registry.v1.resolution_table
+        matches = [path for path in table if "parent_pk" in path]
+        assert matches, "no nested route in the composed resolution table"
+        assert all("[/.]+" not in path for path in matches)
+        assert any(re.match(pattern, "parents/42/children/") for pattern in matches)
+    finally:
+        shutil.rmtree(generated_root, ignore_errors=True)
+        generated_aggregation_root.unlink(missing_ok=True)
+        sys.modules.pop("tests.fixtures_init.api_nested.v1.registry", None)
+        sys.modules.pop("tests.fixtures_init.api_nested.v1", None)
