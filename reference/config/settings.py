@@ -20,6 +20,7 @@ INSTALLED_APPS = [
     "addresses",
     "notifications",
     "webhooks",
+    "catalog",
 ]
 
 DATABASES = {
@@ -38,6 +39,9 @@ TEMPLATES = [
 ]
 
 ROOT_URLCONF = "config.urls"
+
+# Nested-router spike only (.scratch/nested-routers-spike/) — apiver init requires this.
+APIVER_ROOT_PREFIX = "api/"
 
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",

@@ -16,6 +16,7 @@ urlpatterns = [
     path("api/", include("legacy.urls")),
     path("api/", include("addresses.urls")),
     path("api/", include("notifications.urls")),
+    path("api/", include("catalog.urls")),
     # Deliberately the deepest mount in the project — a plausible rename target
     # for a future version (catalogue row 13), and proof the walk can't assume
     # every resource sits one segment under "api/".

@@ -147,12 +147,16 @@ class DiscoveryResult:
 
 
 def _strip_anchors(text: str) -> str:
-    # `^`/`$` are the only regex metacharacters that survive into a
-    # RegexPattern's *declared* text for router-produced leaves — DRF's
-    # routes are always `^{prefix}...{trailing_slash}$` — and `path()`'s
-    # RoutePattern text never contains them at all. Stripping them
-    # unconditionally is safe: neither is legal, unescaped, in a URL path.
-    return text.replace("^", "").replace("$", "")
+    # SPIKE FIX (.scratch/nested-routers-spike/): the old blind
+    # text.replace("^", "").replace("$", "") corrupted a nested router's
+    # prefix — DRF's default lookup_value_regex is the negated character
+    # class `[^/.]+`, and a global replace strips that `^` too, silently
+    # turning "not slash or dot" into "only slash or dot" (matches nothing a
+    # real pk ever looks like). SimpleRouter's route templates
+    # (`^{prefix}...{trailing_slash}$`) only ever anchor at position 0/-1 of
+    # the leaf's own declared text, never elsewhere, so removeprefix/
+    # removesuffix strips exactly the real anchor and nothing inside it.
+    return text.removeprefix("^").removesuffix("$")
 
 
 def _overlaps(a: str, b: str) -> bool:
@@ -208,7 +212,10 @@ def _walk(
             )
         elif isinstance(pattern, URLPattern):
             declared = str(pattern.pattern)
-            absolute = _strip_anchors(ancestor_prefix + declared)
+            # SPIKE FIX: strip the leaf's own anchors before concatenating,
+            # not after — `ancestor_prefix + declared` puts `declared`'s `^`
+            # mid-string, past where a bare removeprefix("^") would look.
+            absolute = ancestor_prefix + _strip_anchors(declared)
             matched_prefix = next((prefix for prefix in prefixes if absolute.startswith(prefix)), None)
             if matched_prefix is None:
                 continue

@@ -2,9 +2,9 @@ from rest_framework import viewsets
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from orders.models import Order
+from orders.models import Order, OrderItem
 from orders.renderers import OrdersCSVRenderer
-from orders.serializers import OrderSerializer
+from orders.serializers import OrderItemSerializer, OrderSerializer
 
 
 class OrderViewSet(viewsets.ModelViewSet):
@@ -12,6 +12,20 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
+
+
+class OrderItemViewSet(viewsets.ModelViewSet):
+    """Nested-router spike: scoped by `order_pk` captured from the router
+    prefix itself (SimpleRouter splices the prefix verbatim, no router
+    library needed) — see .scratch/nested-routers-spike/."""
+
+    serializer_class = OrderItemSerializer
+
+    def get_queryset(self):
+        return OrderItem.objects.filter(order_id=self.kwargs["order_pk"])
+
+    def perform_create(self, serializer):
+        serializer.save(order_id=self.kwargs["order_pk"])
 
 
 class OrdersExportView(APIView):
