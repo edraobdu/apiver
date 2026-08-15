@@ -160,22 +160,22 @@ def _render_registry(
     parent_var = target.parent.name
     parent_keys = target.parent._resolved_keys()
     imports: dict[str, list[str]] = {}
-    entries: list[tuple[str, str, bool]] = []
+    entries: list[tuple[str, str]] = []
+    docs_line: str | None = None
+    schema_line: str | None = None
     errors: list[str] = []
 
-    for key, registration in sorted(registrations.items(), key=lambda item: (item[0] == "schema/", item[0])):
+    for key, registration in sorted(registrations.items()):
         verb = "override" if key in parent_keys else "register"
 
         if key == "schema/":
-            line = (
+            schema_line = (
                 f"{var_name}.{verb}({key!r}, {var_name}.schema_view(prefix={mount_prefix!r}), "
                 f"name={registration.name!r})"
             )
-            entries.append((_prefix_segment(key), line, False))
             continue
         if key == "docs/":
-            line = f"{var_name}.{verb}({key!r}, {var_name}.docs_view(), name={registration.name!r})"
-            entries.append((_prefix_segment(key), line, False))
+            docs_line = f"{var_name}.{verb}({key!r}, {var_name}.docs_view(), name={registration.name!r})"
             continue
 
         handler = registration.handler
@@ -197,9 +197,10 @@ def _render_registry(
             line = f"{var_name}.{verb}({key!r}, {symbol}, basename={registration.basename!r})"
         else:
             line = f"{var_name}.{verb}({key!r}, {symbol}, name={registration.name!r})"
-        entries.append((_prefix_segment(key), line, True))
+        entries.append((_prefix_segment(key), line))
 
-    register_lines = _grouped_register_lines(entries)
+    tail = [line for line in (docs_line, schema_line) if line is not None]
+    register_lines = _grouped_register_lines(entries, tail=tail)
 
     # A key the parent still resolves but target's own resolution_table
     # doesn't means target (or something between it and the parent) removed
