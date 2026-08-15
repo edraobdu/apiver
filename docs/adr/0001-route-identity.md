@@ -50,10 +50,15 @@ see Consequences.
    namespaces.** `reverse('payments-detail')` continues to resolve to the base version;
    `reverse('v2:payments-detail')` reaches V2.
 
-5. **Nested routers and non-`SimpleRouter`/`DefaultRouter` routers are refused in 0.1**, detected and
-   hard-failed at registration. Composition additionally **verifies itself**: after building a version,
-   apiver re-walks the result and diffs the set of `(absolute path, method)` against what it intended to
-   produce, failing hard on any mismatch.
+5. **Passing a router *instance or class* as a handler is refused**, detected and hard-failed at
+   registration — `register()`/`override()` bind exactly one ViewSet or view per call, and a router is
+   neither. This does not reach nested routing itself: a nested resource's parent-lookup group lives in
+   the *prefix string* handed to `register()`/`register_nested()`, not in the handler, so composing one
+   was never blocked by this check and needs no exemption from it (ticket 103 spike, narrowing the
+   original wording here, which read as a blanket nested-router refusal it never actually was).
+   Composition additionally **verifies itself**: after building a version, apiver re-walks the result and
+   diffs the set of `(absolute path, method)` against what it intended to produce, failing hard on any
+   mismatch.
 
 ## Consequences
 
