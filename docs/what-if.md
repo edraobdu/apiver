@@ -55,14 +55,43 @@ line, `path("", include("apiversions.urls"))`, is something you do by hand, once
 to that file itself. Nothing routes every URL in the project through apiver's verbs, only the ones you
 actually want versioned.
 
-## What if my project uses a custom or nested router?
+## What if my project uses a nested router?
 
-Refused loudly, not silently mishandled. 0.1 composes against `SimpleRouter`/`DefaultRouter` semantics
-only — a nested router or a custom one apiver doesn't recognize is hard-failed at registration time,
-with every offending route named at once, rather than composed into something subtly wrong. Register
-those routes directly with `register()`/`override()` (apiver works uniformly across ViewSets, `APIView`s,
-function views, and plain Django views — it doesn't require a router at all) as the documented path
-today.
+`register_nested()`/`override_nested()` — a nested resource is an ordinary Registration whose key embeds
+its parent's lookup group, and these are the sugar for writing that key without hand-rolling the regex:
+
+```python
+from catalog.views import CategoryViewSet, CollectionViewSet, ProductViewSet, ReviewViewSet
+
+v1.register("categories", CategoryViewSet, basename="categories")
+# Two siblings under the same parent — neither retypes the other's regex:
+v1.register_nested("products", ProductViewSet, parent="categories", lookup="<int:category_pk>")
+v1.register_nested("collections", CollectionViewSet, parent="categories", lookup="<int:category_pk>")
+# A third level, nested under one of those siblings:
+v1.register_nested("reviews", ReviewViewSet, parent="products", lookup="<int:product_pk>")
+```
+
+`lookup=` takes Django's own `path()` converter syntax, translated internally to the regex fragment DRF's
+router needs — no regex to get right by hand, and no new dependency (it reuses `django.urls`'s own
+converter parsing). Each call still produces exactly one ordinary Registration, individually targetable
+by `override_nested()`/`remove()` exactly like any other — `v2.override_nested("reviews",
+ReviewViewSetV2, parent="products", lookup="<int:product_pk>")` touches only that one leaf, no ancestor
+regex retyped, parent resource untouched (ADR 0001 item 3).
+
+What's still refused is passing an actual router *instance or class* as a handler to `register()` —
+nesting was never expressed that way, and `register()`/`override()` each bind exactly one ViewSet or
+view per call (ADR 0001 item 5).
+
+A custom router apiver doesn't otherwise recognize is a different question: it hard-fails at
+registration time, with every offending route named at once, rather than being composed into something
+subtly wrong. Register those routes directly with `register()`/`override()` — apiver works uniformly
+across ViewSets, `APIView`s, function views, and plain Django views, and doesn't require a router at all
+— as the documented path today.
+
+One case is still a known gap: nesting expressed as a parent lookup embedded in an *ancestor* `include()`
+segment (`path("orders/<int:pk>/", include(child_router.urls))`) rather than in the router's own prefix.
+`apiver init` doesn't discover that shape; author it with `register()`/`register_nested()` going forward
+instead.
 
 ## What if I'm already using Cadwyn?
 

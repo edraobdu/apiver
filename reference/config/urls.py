@@ -13,6 +13,7 @@ urlpatterns = [
     path("api/", include("users.urls")),
     path("api/", include("payments.urls")),
     path("api/", include("orders.urls")),
+    path("api/", include("catalog.urls")),
     path("api/", include("legacy.urls")),
     path("api/", include("addresses.urls")),
     path("api/", include("notifications.urls")),

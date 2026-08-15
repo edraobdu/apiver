@@ -7,6 +7,7 @@ from typing import Any
 
 from django.http import JsonResponse
 from django.urls import URLPattern, include, path
+from django.urls.resolvers import RoutePattern
 from django.utils import timezone
 from django.utils.http import http_date
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
@@ -87,12 +88,32 @@ def _classify(handler: Any) -> str:
     )
     if is_router:
         raise TypeError(
-            f"{handler!r} is a router, not a ViewSet or view. Nested routers are "
-            "refused — register the ViewSet(s) it wraps directly (ADR 0001 item 5)."
+            f"{handler!r} is a router, not a ViewSet or view — register()/override() bind "
+            "exactly one of those per call. Register the ViewSet(s) it wraps directly; for "
+            "a nested resource, register_nested()/override_nested() (ADR 0001 item 5)."
         )
     if isinstance(handler, type) and issubclass(handler, ViewSetMixin):
         return "viewset"
     return "view"
+
+
+def _lookup_regex(lookup: str) -> str:
+    """Translate a `register_nested()`/`override_nested()` `lookup=` fragment
+    — Django's own `path()` converter syntax, e.g. `"<int:category_pk>"` —
+    into the regex fragment DRF's router prefix needs.
+
+    Reuses `RoutePattern`, the exact machinery `path()` itself calls, rather
+    than hand-rolling a second converter parser (ticket 103, ADR 0007's
+    reject-heuristics stance: this is stdlib parsing, not a guess). A
+    trailing `/` is appended before parsing so a bare converter (with no
+    literal path segment around it) still parses as one, then both the
+    leading `^` and that trailing `/` are stripped back off — `RoutePattern`
+    always anchors at position 0 and, for input ending in `/`, at position
+    -1, so this can never touch a `^`/`/` that's part of the converter's own
+    output (same reasoning `init.py`'s `_strip_anchors` fix relies on).
+    """
+    pattern = RoutePattern(f"{lookup}/").regex.pattern
+    return pattern.removeprefix("^").removesuffix("/")
 
 
 def _path_str(url_pattern: Any) -> str:
@@ -205,6 +226,111 @@ class Version:
         if self.parent is not None:
             return self.parent._current_handler_for(key)
         return None
+
+    def _resolved_registration(self, key: str) -> Registration | None:
+        """The Registration currently resolving `key` through this Version's
+        own registrations or its parent chain, if any — `register_nested()`/
+        `override_nested()` use this to find `parent`'s own (possibly itself
+        compound) key to embed a lookup group under, the same walk
+        `_current_handler_for` does for the handler alone."""
+        registration = self._registrations.get(key)
+        if registration is not None:
+            return registration
+        if key in self._removed:
+            return None
+        if self.parent is not None:
+            return self.parent._resolved_registration(key)
+        return None
+
+    def _resolved_registration_by_basename(self, basename: str) -> Registration | None:
+        """The Registration currently resolving `basename`, if any — how
+        `register_nested()`/`override_nested()` resolve `parent=` (ticket
+        103). A nested Registration's own `key` is the full compound path
+        (parent's key + lookup regex + its own leaf), not the short name a
+        caller writes as `parent=`, so lookup has to go through `basename`
+        — the one thing that stays the leaf's plain name (`"products"`, not
+        `"categories/(?P<category_pk>[0-9]+)/products"`) whether or not the
+        registration is nested. Walked over `_resolved_keys()` rather than
+        `self._registrations` alone, so a parent inherited unchanged from an
+        ancestor still resolves."""
+        for key in self._resolved_keys():
+            registration = self._resolved_registration(key)
+            if registration is not None and registration.basename == basename:
+                return registration
+        return None
+
+    def _nested_key(self, parent: str, lookup: str) -> str:
+        """The compound key a nested registration resolves `parent`'s own
+        key against — `f"{parent's key}/{lookup regex}"`, ready for the
+        leaf's own key to be appended (ticket 103). `parent`'s key may
+        itself be compound, so a 3-level chain composes without either level
+        re-typing an ancestor's regex."""
+        # Basename first (how a nested Registration's leaf name is found);
+        # falling back to a literal-key lookup covers a `parent=` that names
+        # a "view" Registration, whose basename is never set — so this
+        # still finds it and reports the precise "not a ViewSet" TypeError
+        # below, rather than a misleading "not registered" ValueError.
+        parent_registration = self._resolved_registration_by_basename(parent) or self._resolved_registration(
+            parent
+        )
+        if parent_registration is None:
+            raise ValueError(
+                f"{parent!r} is not registered on version {self.name!r} or any of "
+                "its ancestors, so it cannot be used as parent= for a nested "
+                "registration."
+            )
+        if parent_registration.kind != "viewset":
+            raise TypeError(
+                f"{parent!r} is registered as a {parent_registration.kind}, not a "
+                "ViewSet, so it has no router prefix a nested registration can be "
+                "embedded under."
+            )
+        return f"{parent_registration.key}/{_lookup_regex(lookup)}"
+
+    def register_nested(
+        self,
+        key: str,
+        handler: Any,
+        *,
+        parent: str,
+        lookup: str,
+        basename: str | None = None,
+        name: str | None = None,
+    ) -> "Version":
+        """Bind a new key nested under `parent`'s own router prefix — flat
+        sugar over `register()`, not a hierarchical builder (ticket 103):
+        this call still produces exactly one ordinary Registration, keyed on
+        the compound path (`f"{parent's key}/{lookup regex}/{key}"`) and
+        individually targetable by `override_nested()`/`remove()` exactly
+        like any other registration, preserving ADR 0001 item 3 (a whole
+        registration is the smallest unit of override).
+
+        `lookup` takes Django's own `path()` converter syntax (e.g.
+        `"<int:category_pk>"`), translated to the regex fragment DRF's
+        router needs by `_lookup_regex()` — not a hand-rolled regex, and not
+        widened to plain `register()`'s literal `key`, which is a separate,
+        unrelated ergonomics question.
+        """
+        compound_key = self._nested_key(parent, lookup)
+        return self.register(f"{compound_key}/{key}", handler, basename=basename or key, name=name)
+
+    def override_nested(
+        self,
+        key: str,
+        handler: Any,
+        *,
+        parent: str,
+        lookup: str,
+        basename: str | None = None,
+        name: str | None = None,
+    ) -> "Version":
+        """Replace an existing nested Registration — the `override_nested()`
+        counterpart to `register_nested()` (ticket 103). `parent`/`lookup`
+        must reproduce the exact compound key the original
+        `register_nested()` call produced; this touches exactly that one
+        Registration, with no ancestor chain to reconstruct."""
+        compound_key = self._nested_key(parent, lookup)
+        return self.override(f"{compound_key}/{key}", handler, basename=basename or key, name=name)
 
     def _check_suffix(self, verb: str, handler: Any, *, exempt: bool = False) -> None:
         """Refuse a class-based handler whose name doesn't carry this

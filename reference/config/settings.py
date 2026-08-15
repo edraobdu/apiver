@@ -16,6 +16,7 @@ INSTALLED_APPS = [
     "users",
     "payments",
     "orders",
+    "catalog",
     "legacy",
     "addresses",
     "notifications",
