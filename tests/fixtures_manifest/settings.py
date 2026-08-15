@@ -34,5 +34,6 @@ DATABASES = {
 ROOT_URLCONF = "tests.fixtures_manifest.api.urls"
 
 APIVER_ROOT_DIR = "tests.fixtures_manifest.api"
+APIVER_ROOT_PREFIX = "api/"
 APIVER_VERSIONS = ["v1", "v2"]
 APIVER_ALIASES = ["stable"]

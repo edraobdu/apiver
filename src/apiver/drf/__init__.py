@@ -2,6 +2,7 @@ from .checks import (
     check_alias_registration,
     check_manifest_freshness,
     check_max_live_versions,
+    check_unregistered_urlconf_routes,
     check_version_layout,
     check_version_scheme,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "check_alias_registration",
     "check_manifest_freshness",
     "check_max_live_versions",
+    "check_unregistered_urlconf_routes",
     "check_version_layout",
     "check_version_scheme",
     "remove_version",
