@@ -265,6 +265,67 @@ def check_max_live_versions(app_configs=None, **kwargs) -> list[Error | Warning]
 
 
 @register()
+def check_unregistered_urlconf_routes(app_configs=None, **kwargs) -> list[Error]:
+    """Flags a route hand-added to `ROOT_URLCONF` (most often a project's
+    own pre-existing per-app `urls.py`, edited the pre-apiver way) that no
+    configured Live Version or Alias actually owns (ticket #106) — the
+    class of silent failure apiver's own philosophy is built to refuse
+    elsewhere (`field = None`, the removed-field MRO walk, composition's
+    self-verification), except here the gap sits in the adoption story
+    itself: nothing about a route mounted the old way fails, it's just
+    invisible to `apiver versions`/`apiver diff`/`apiver manifest`/the
+    generated OpenAPI schema, completely bypassing the version system the
+    project adopted apiver to get.
+
+    Error, not Warning: unlike a stale manifest (`apiver.W001`, annoying but
+    harmless), a route silently bypassing versioning is exactly the class of
+    problem apiver exists to refuse.
+
+    A project adopting apiver deliberately keeps its pre-adoption routes
+    dual-mounted alongside the new Aggregation Root (ADR 0007's adoption
+    story) — those must not be flagged just for existing. This check can't
+    tell "pre-existing, expected to keep existing" apart from "genuinely new"
+    by prefix alone, so it doesn't try to: it diffs the live URLconf's
+    unowned routes against `apiver.toml`'s own `urlconf_extras`, captured
+    the last time `apiver manifest` ran (the same staleness idiom
+    `check_manifest_freshness` already uses for `apiver.W001`) — a route
+    already present at that snapshot is the known dual-mounted surface, a
+    route that wasn't is new. A missing manifest means there's no snapshot
+    yet to diff against, so this is a no-op until one exists;
+    `check_manifest_freshness` already nags for that separately.
+
+    A no-op when `APIVER_VERSIONS` isn't configured, the same convention
+    every other manifest-dependent check here uses.
+    """
+    if not getattr(settings, "APIVER_VERSIONS", None):
+        return []
+
+    try:
+        resolved, current, committed = manifest_diff()
+    except ManifestError as exc:
+        return [Error(f"apiver.toml could not be generated: {exc}", id="apiver.E004")]
+
+    if committed is None:
+        return []  # no prior `apiver manifest` run to diff against yet
+
+    current_extras = set(current.get("urlconf_extras", []))
+    baseline_extras = set(committed.get("urlconf_extras", []))
+    new_routes = sorted(current_extras - baseline_extras)
+    if not new_routes:
+        return []
+
+    return [
+        Error(
+            f"ROOT_URLCONF has {len(new_routes)} route(s) that aren't owned by any configured Live "
+            f"Version or Alias, and weren't present the last time `apiver manifest` ran: "
+            f"{new_routes!r}. Register them on a Version with register()/override(), or run `apiver "
+            f"manifest` if they're intentionally outside apiver (e.g. a health check).",
+            id="apiver.E012",
+        )
+    ]
+
+
+@register()
 def check_version_scheme(app_configs=None, **kwargs) -> list[Error]:
     """Validates `APIVER_VERSION_SCHEME` names one of apiver's three
     built-in Schemes (ticket #66, ADR 0008 item 3) — the same

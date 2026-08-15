@@ -34,6 +34,7 @@ from django.conf import settings
 
 from ..schemes import DEFAULT_SCHEME_NAME, Scheme, UnknownSchemeError, get_scheme
 from ..versions_report import MANIFEST_FILENAME, load_committed_manifest
+from ._urlconf_walk import _Endpoint, _walk
 from .version import Alias, Version
 
 __all__ = [
@@ -106,6 +107,83 @@ def load_version(name: str, *, root_dir: str | None = None) -> Version:
     return obj
 
 
+def _root_prefix() -> str:
+    """`APIVER_ROOT_PREFIX`, the one absolute path every Version mounts
+    under (ADR 0007 item 3) — required here, unlike `resolve_root_dir()`,
+    because the unregistered-route audit (`_owned_urlconf_paths`, ticket
+    #106) needs to know *where in the URLconf* to look for each Version's
+    routes, not just which Python package it lives in.
+    """
+    root_prefix = getattr(settings, "APIVER_ROOT_PREFIX", None)
+    if root_prefix is None:
+        raise ManifestError(
+            "APIVER_ROOT_PREFIX is not set — apiver doesn't know the absolute URL path every "
+            "version mounts under (ADR 0007 item 3), so it cannot tell which ROOT_URLCONF routes "
+            "belong to a Live Version."
+        )
+    return root_prefix.lstrip("/")
+
+
+def _walked_paths(patterns: Any, *, mount_prefix: str) -> set[str]:
+    """Every absolute path `patterns` resolves to once mounted at
+    `mount_prefix` — `_walk` (shared with `apiver.drf.init`) walked with a
+    single, always-matching prefix rather than `init`'s adoption-scoped
+    `--prefix` list, since here nothing is being filtered out."""
+    endpoints: list[_Endpoint] = []
+    diagnostics: list[str] = []
+    _walk(
+        patterns,
+        prefixes=[mount_prefix],
+        ancestor_prefix=mount_prefix,
+        depth=0,
+        endpoints=endpoints,
+        diagnostics=diagnostics,
+    )
+    return {endpoint.path for endpoint in endpoints}
+
+
+def _owned_urlconf_paths(versions: dict[str, Version], aliases: dict[str, Alias], scheme: Scheme) -> set[str]:
+    """Every absolute path a configured Live Version or Alias actually
+    mounts (ticket #106) — walked from each one's own `.urls` patterns at
+    its conventional mount point (`APIVER_ROOT_PREFIX + display_name + "/"`,
+    the same formula `apiver init`/`apiver mount` use to write it), rather
+    than derived by string-concatenating `resolution_table` keys: a
+    Version's own routes are router-produced `RegexPattern`s whose declared
+    text already *is* their compiled regex, but a plain `register()` view
+    route is a `path()`-produced `RoutePattern` whose declared text isn't —
+    walking both `.urls` and the live URLconf with the same `_walk` keeps
+    the two sides of the comparison in the same representation no matter
+    which kind of route it is.
+    """
+    root_prefix = _root_prefix()
+    owned: set[str] = set()
+    for name, version in versions.items():
+        patterns, _ = version.urls
+        mount_prefix = root_prefix + f"{scheme.format(name)}/"
+        owned |= _walked_paths(patterns, mount_prefix=mount_prefix)
+    for name, alias in aliases.items():
+        patterns, _ = alias.target.urls
+        owned |= _walked_paths(patterns, mount_prefix=root_prefix + f"{name}/")
+    return owned
+
+
+def _live_urlconf_paths() -> set[str]:
+    """Every absolute path the project's actual, currently-configured
+    `ROOT_URLCONF` resolves to right now (ticket #106) — ground truth for
+    the unregistered-route audit, walked fresh rather than read from
+    anywhere apiver itself wrote, since the whole point is to catch a route
+    that bypassed apiver entirely.
+    """
+    root_urlconf_name = getattr(settings, "ROOT_URLCONF", None)
+    if not root_urlconf_name:
+        raise ManifestError("ROOT_URLCONF is not set — apiver cannot walk the project's live URLconf.")
+    try:
+        root_urlconf = import_module(root_urlconf_name)
+    except ImportError as exc:
+        raise ManifestError(f"ROOT_URLCONF {root_urlconf_name!r} could not be imported: {exc}") from exc
+    return _walked_paths(root_urlconf.urlpatterns, mount_prefix="")
+
+
 def _load_aliases() -> dict[str, Alias]:
     names: list[str] = getattr(settings, "APIVER_ALIASES", [])
     if not names:
@@ -175,14 +253,32 @@ def build_manifest() -> dict[str, Any]:
     `scheme` is recorded once, top-level (ADR 0008 item 2: declared per
     project, not per Version) — `apiver versions` (`versions_report.py`)
     reads it back to sort and format without needing Django settings itself.
+
+    `urlconf_extras` (ticket #106) is every absolute path the live
+    `ROOT_URLCONF` resolves to that no configured Version or Alias actually
+    owns — most commonly the pre-adoption routes ADR 0007's adoption story
+    deliberately leaves dual-mounted alongside the new Aggregation Root.
+    Computed *after* `version_entries`/`alias_entries` below, not before:
+    both already resolved every name through the configured Scheme via
+    `_version_entry`'s own `ManifestError`-wrapped call, so by the time
+    `_owned_urlconf_paths` calls `scheme.format()` again for those same
+    names, it's guaranteed not to raise — this function still has exactly
+    one place a scheme mismatch is reported from.
     """
     versions = _load_versions()
     aliases = _load_aliases()
     scheme_name, scheme = _configured_scheme()
+    version_entries = {name: _version_entry(version, scheme) for name, version in versions.items()}
+    alias_entries = {name: alias.target.name for name, alias in aliases.items()}
+
+    owned = _owned_urlconf_paths(versions, aliases, scheme)
+    extras = sorted(_live_urlconf_paths() - owned)
+
     return {
         "scheme": scheme_name,
-        "versions": {name: _version_entry(version, scheme) for name, version in versions.items()},
-        "aliases": {name: alias.target.name for name, alias in aliases.items()},
+        "versions": version_entries,
+        "aliases": alias_entries,
+        "urlconf_extras": extras,
     }
 
 

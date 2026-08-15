@@ -43,3 +43,9 @@ TEMPLATES = [
 ]
 
 ROOT_URLCONF = "tests.testapp.urls"
+
+# Matches testapp/urls.py's own "api/v1/", "api/v2/", ... mounts (ADR 0007
+# item 3) — set here, not per-test, so build_manifest()'s unregistered-route
+# audit (ticket #106) has somewhere to resolve a Version's mount prefix from
+# even in tests that only override APIVER_ROOT_DIR/APIVER_VERSIONS.
+APIVER_ROOT_PREFIX = "api/"

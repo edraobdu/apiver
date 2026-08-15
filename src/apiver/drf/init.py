@@ -58,17 +58,12 @@ from pathlib import Path
 from typing import Any
 
 from django.conf import settings
-from django.urls import URLPattern, URLResolver
-from django.urls.resolvers import LocalePrefixPattern, RegexPattern
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
-from rest_framework.routers import APIRootView
 
 from ..schemes import DEFAULT_SCHEME_NAME, Scheme, UnknownSchemeError, get_scheme
+from ._urlconf_walk import _Endpoint, _overlaps, _walk
 from .manifest import resolve_root_dir
 from .version import Version
-
-_FORMAT_SUFFIX_RE = re.compile(r"\(\?P<format>|drf_format_suffix")
-_MAX_DEPTH = 64
 
 
 class InitError(RuntimeError):
@@ -108,21 +103,6 @@ def _validate_scheme_conformance(name: str, *, scheme: Scheme, arg_prefix: str =
 
 
 @dataclass(frozen=True)
-class _Endpoint:
-    """One discovered, in-scope route, before grouping into registrations."""
-
-    path: str  # absolute path, anchors stripped, relative to nothing
-    ancestor_prefix: str  # everything before this leaf's own declared text
-    url_name: str | None
-    callback: Any
-    cls: type | None
-    actions: dict[str, str] | None
-    initkwargs: dict[str, Any]
-    is_regex_declared: bool  # re_path(), not path() — checked in discover()
-    matched_prefix: str  # which of discover()'s (non-overlapping) --prefix values this fell under
-
-
-@dataclass(frozen=True)
 class RegistrationPlan:
     """One `register()` call init will emit."""
 
@@ -144,102 +124,6 @@ class DiscoveryResult:
     plans: list[RegistrationPlan]
     diagnostics: list[str] = field(default_factory=list)
     _groups: dict[str, list[_Endpoint]] = field(default_factory=dict)
-
-
-def _strip_anchors(text: str) -> str:
-    # `^`/`$` are the only regex metacharacters that survive into a
-    # RegexPattern's *declared* text for router-produced leaves — DRF's
-    # routes are always `^{prefix}...{trailing_slash}$`, anchored only at
-    # position 0/-1 of that text — and `path()`'s RoutePattern text never
-    # contains them at all. removeprefix/removesuffix strips exactly that
-    # real anchor; a blind global replace does not, because DRF's default
-    # lookup_value_regex is itself the negated character class `[^/.]+` —
-    # replacing every `^` corrupts it into `[/.]+` ("only slash or dot")
-    # the moment a nested router's prefix embeds a parent lookup group.
-    return text.removeprefix("^").removesuffix("$")
-
-
-def _overlaps(a: str, b: str) -> bool:
-    return a.startswith(b) or b.startswith(a)
-
-
-def _walk(
-    patterns: Any,
-    *,
-    prefixes: list[str],
-    ancestor_prefix: str,
-    depth: int,
-    endpoints: list[_Endpoint],
-    diagnostics: list[str],
-) -> None:
-    if depth > _MAX_DEPTH:
-        diagnostics.append(
-            f"recursion depth exceeded while walking below {ancestor_prefix!r} — a URLconf that "
-            "includes itself?"
-        )
-        return
-
-    for pattern in patterns:
-        if isinstance(pattern, URLResolver):
-            child_prefix = ancestor_prefix + str(pattern.pattern)
-            if not any(_overlaps(_strip_anchors(child_prefix), prefix) for prefix in prefixes):
-                continue  # provably outside every --prefix; do not even walk in
-
-            if isinstance(pattern.pattern, LocalePrefixPattern):
-                diagnostics.append(
-                    "i18n_patterns() found at the URLconf root — its prefix depends on the active "
-                    "language at walk time, so the discovered paths would be non-deterministic "
-                    "(ticket 02 F14). Not supported by init; adopt without i18n_patterns() first, "
-                    "or write registry.py by hand."
-                )
-                continue
-            if pattern.namespace is not None:
-                diagnostics.append(
-                    f"{child_prefix!r} is included under namespace {pattern.namespace!r} — init "
-                    "only supports the base version's bare, unnamespaced URL names (ADR 0001 item 4, "
-                    "ticket 02 F15). Remove the namespace before adopting, or write registry.py by "
-                    "hand."
-                )
-                continue
-
-            _walk(
-                pattern.url_patterns,
-                prefixes=prefixes,
-                ancestor_prefix=child_prefix,
-                depth=depth + 1,
-                endpoints=endpoints,
-                diagnostics=diagnostics,
-            )
-        elif isinstance(pattern, URLPattern):
-            declared = str(pattern.pattern)
-            # Strip the leaf's own anchors before concatenating, not after:
-            # `ancestor_prefix + declared` puts `declared`'s leading `^`
-            # mid-string, past where removeprefix("^") would find it.
-            absolute = ancestor_prefix + _strip_anchors(declared)
-            matched_prefix = next((prefix for prefix in prefixes if absolute.startswith(prefix)), None)
-            if matched_prefix is None:
-                continue
-            if _FORMAT_SUFFIX_RE.search(declared):
-                continue  # ticket 02 F16: DefaultRouter's format-suffix duplicate
-
-            callback = pattern.callback
-            cls = getattr(callback, "cls", None) or getattr(callback, "view_class", None)
-            if cls is APIRootView:
-                continue  # ticket 02 F4: router-computed, nothing to regenerate
-
-            endpoints.append(
-                _Endpoint(
-                    path=absolute,
-                    ancestor_prefix=_strip_anchors(ancestor_prefix),
-                    url_name=pattern.name,
-                    callback=callback,
-                    cls=cls,
-                    actions=getattr(callback, "actions", None),
-                    initkwargs=getattr(callback, "initkwargs", {}),
-                    is_regex_declared=isinstance(pattern.pattern, RegexPattern),
-                    matched_prefix=matched_prefix,
-                )
-            )
 
 
 def _relative(prefix: str, path: str) -> str:
