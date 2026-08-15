@@ -33,7 +33,13 @@ from django.conf import settings
 
 from ..schemes import DEFAULT_SCHEME_NAME, Scheme, UnknownSchemeError, get_scheme
 from .checks import _check_no_extra_entries, _check_registry_has_no_inline_definitions
-from .init import _resolve_class_symbol, _resolve_function_symbol, _resolve_target_dir
+from .init import (
+    _grouped_register_lines,
+    _prefix_segment,
+    _resolve_class_symbol,
+    _resolve_function_symbol,
+    _resolve_target_dir,
+)
 from .manifest import ManifestError, load_version, resolve_root_dir
 from .version import Registration, Version
 
@@ -154,22 +160,22 @@ def _render_registry(
     parent_var = target.parent.name
     parent_keys = target.parent._resolved_keys()
     imports: dict[str, list[str]] = {}
-    register_lines: list[str] = []
+    entries: list[tuple[str, str, bool]] = []
     errors: list[str] = []
 
     for key, registration in sorted(registrations.items(), key=lambda item: (item[0] == "schema/", item[0])):
         verb = "override" if key in parent_keys else "register"
 
         if key == "schema/":
-            register_lines.append(
+            line = (
                 f"{var_name}.{verb}({key!r}, {var_name}.schema_view(prefix={mount_prefix!r}), "
                 f"name={registration.name!r})"
             )
+            entries.append((_prefix_segment(key), line, False))
             continue
         if key == "docs/":
-            register_lines.append(
-                f"{var_name}.{verb}({key!r}, {var_name}.docs_view(), name={registration.name!r})"
-            )
+            line = f"{var_name}.{verb}({key!r}, {var_name}.docs_view(), name={registration.name!r})"
+            entries.append((_prefix_segment(key), line, False))
             continue
 
         handler = registration.handler
@@ -188,9 +194,12 @@ def _render_registry(
         imports.setdefault(module, []).append(symbol)
 
         if registration.kind == "viewset":
-            register_lines.append(f"{var_name}.{verb}({key!r}, {symbol}, basename={registration.basename!r})")
+            line = f"{var_name}.{verb}({key!r}, {symbol}, basename={registration.basename!r})"
         else:
-            register_lines.append(f"{var_name}.{verb}({key!r}, {symbol}, name={registration.name!r})")
+            line = f"{var_name}.{verb}({key!r}, {symbol}, name={registration.name!r})"
+        entries.append((_prefix_segment(key), line, True))
+
+    register_lines = _grouped_register_lines(entries)
 
     # A key the parent still resolves but target's own resolution_table
     # doesn't means target (or something between it and the parent) removed

@@ -116,6 +116,23 @@ def test_schema_registration_is_emitted_last(_restore_v3_registry):
     assert refunds_index < schema_index
 
 
+def test_squashed_output_groups_lines_by_url_prefix_segment(_restore_v3_registry):
+    """ticket #105: register()/override() lines are grouped by the text
+    before the first '/' in their key, each group under its own
+    "# ----- <segment> -----" header; schema/docs stay singleton and
+    unlabeled."""
+    result = squash_version("v3")
+    source = result.registry_path.read_text()
+
+    assert "# ----- payments -----" in source
+    assert "# ----- refunds -----" in source
+    assert "# ----- schema -----" not in source
+    assert "# ----- docs -----" not in source
+    payments_header = source.index("# ----- payments -----")
+    payments_line = source.index("v3.override('payments'")
+    assert payments_header < payments_line
+
+
 def test_squash_refuses_a_version_with_no_parent():
     with pytest.raises(SquashError, match="Base Version"):
         squash_version("v1")

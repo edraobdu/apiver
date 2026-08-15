@@ -693,6 +693,39 @@ def _is_default_docs_view(plan: RegistrationPlan) -> bool:
     )
 
 
+def _prefix_segment(key: str) -> str:
+    """The text before the first `/` in a registration `key` — the group a
+    rendered `register()`/`override()` line belongs under (ticket #105).
+    `'orders/(?P<order_pk>[^/.]+)/items'` -> `'orders'`;
+    `'addresses'` (no `/` at all) -> `'addresses'`, its own singleton group.
+    """
+    return key.split("/", 1)[0] or key
+
+
+def _grouped_register_lines(entries: list[tuple[str, str, bool]]) -> list[str]:
+    """`entries` is `(segment, line, headered)` in the order the lines must
+    render in — same-segment entries are always already adjacent, since
+    both callers sort registrations by key and a shared prefix segment
+    keeps consecutive keys together in lexicographic order. Inserts a
+    blank line before every new segment; a `# ----- <segment> -----`
+    header is only emitted when `headered` is true, so callers can pass
+    `headered=False` for `schema/`/`docs/` — they stay singleton and
+    unlabeled, at whatever position their own sort already gave them
+    (ticket #105).
+    """
+    lines: list[str] = []
+    current_segment: object = object()  # sentinel: always differs from the first entry's segment
+    for segment, line, headered in entries:
+        if segment != current_segment:
+            if lines:
+                lines.append("")
+            if headered:
+                lines.append(f"# ----- {segment} -----")
+            current_segment = segment
+        lines.append(line)
+    return lines
+
+
 def render_registry(plans: list[RegistrationPlan], *, base_name: str, var_name: str) -> str:
     """Render `registry.py`'s source text. Deterministic: plans are
     processed in the sorted-by-key order `discover()` already returns them
@@ -712,14 +745,13 @@ def render_registry(plans: list[RegistrationPlan], *, base_name: str, var_name: 
         for module, symbols in sorted(imports.items())
     ]
 
-    register_lines = []
+    entries: list[tuple[str, str, bool]] = []
     for plan in plans:
+        headered = plan.kind not in ("schema", "docs")
         if plan.kind == "viewset":
-            register_lines.append(
-                f"{var_name}.register({plan.key!r}, {plan.symbol}, basename={plan.basename!r})"
-            )
+            line = f"{var_name}.register({plan.key!r}, {plan.symbol}, basename={plan.basename!r})"
         elif plan.kind == "schema":
-            register_lines.append(
+            line = (
                 f"{var_name}.register({plan.key!r}, {var_name}.schema_view(prefix={plan.schema_prefix!r}), "
                 f"name={plan.name!r})"
             )
@@ -729,9 +761,12 @@ def render_registry(plans: list[RegistrationPlan], *, base_name: str, var_name: 
                 if _is_default_docs_view(plan)
                 else f"{var_name}.docs_view(view_class={plan.symbol})"
             )
-            register_lines.append(f"{var_name}.register({plan.key!r}, {docs_view_call}, name={plan.name!r})")
+            line = f"{var_name}.register({plan.key!r}, {docs_view_call}, name={plan.name!r})"
         else:
-            register_lines.append(f"{var_name}.register({plan.key!r}, {plan.symbol}, name={plan.name!r})")
+            line = f"{var_name}.register({plan.key!r}, {plan.symbol}, name={plan.name!r})"
+        entries.append((_prefix_segment(plan.key), line, headered))
+
+    register_lines = _grouped_register_lines(entries)
 
     lines = [
         '"""Generated once by `apiver init`; hand-editable afterwards, like',

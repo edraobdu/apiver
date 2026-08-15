@@ -112,6 +112,23 @@ def test_init_writes_registry_py_the_aggregation_root_and_the_manifest(tmp_path)
     # The status/ route sits outside --prefix "api/" and must not appear.
     assert "status" not in source
 
+    # ticket #105: register()/override() lines are grouped by URL-prefix
+    # segment (the text before the first '/'), each group under its own
+    # "# ----- <segment> -----" header — 'gadgets' and 'gadgets/summary/'
+    # share the 'gadgets' segment and land in one group; schema/docs stay
+    # singleton and unlabeled.
+    assert "# ----- gadgets -----" in source
+    gadgets_header = source.index("# ----- gadgets -----")
+    gadgets_register = source.index("v1.register('gadgets',")
+    gadgets_summary_register = source.index("v1.register('gadgets/summary/'")
+    assert gadgets_header < gadgets_register < gadgets_summary_register
+    assert "# ----- healthz -----" in source
+    assert "# ----- integrations -----" in source
+    assert "# ----- ping -----" in source
+    assert "# ----- widgets -----" in source
+    assert "# ----- schema -----" not in source
+    assert "# ----- docs -----" not in source
+
     aggregation_path = GENERATED_AGGREGATION_ROOT
     assert aggregation_path.is_file()
     aggregation_source = aggregation_path.read_text()
