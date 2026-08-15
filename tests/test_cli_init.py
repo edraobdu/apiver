@@ -115,8 +115,9 @@ def test_init_writes_registry_py_the_aggregation_root_and_the_manifest(tmp_path)
     # ticket #105: register()/override() lines are grouped by URL-prefix
     # segment (the text before the first '/'), each group under its own
     # "# ----- <segment> -----" header — 'gadgets' and 'gadgets/summary/'
-    # share the 'gadgets' segment and land in one group; schema/docs stay
-    # singleton and unlabeled.
+    # share the 'gadgets' segment and land in one group. schema/docs are
+    # unlabeled and pinned together at the very end, in that order, rather
+    # than scattered wherever their own key happens to sort alphabetically.
     assert "# ----- gadgets -----" in source
     gadgets_header = source.index("# ----- gadgets -----")
     gadgets_register = source.index("v1.register('gadgets',")
@@ -128,6 +129,15 @@ def test_init_writes_registry_py_the_aggregation_root_and_the_manifest(tmp_path)
     assert "# ----- widgets -----" in source
     assert "# ----- schema -----" not in source
     assert "# ----- docs -----" not in source
+    docs_index = source.index("v1.register('docs/'")
+    schema_index = source.index("v1.register('schema/'")
+    widgets_index = source.index("v1.register('widgets'")
+    assert widgets_index < docs_index < schema_index
+    # docs/schema are the last two lines in the file (before the trailing blank).
+    assert source.rstrip("\n").splitlines()[-2:] == [
+        "v1.register('docs/', v1.docs_view(), name='v1-docs')",
+        "v1.register('schema/', v1.schema_view(prefix='api/v1/'), name='v1-schema')",
+    ]
 
     aggregation_path = GENERATED_AGGREGATION_ROOT
     assert aggregation_path.is_file()

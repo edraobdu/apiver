@@ -702,27 +702,36 @@ def _prefix_segment(key: str) -> str:
     return key.split("/", 1)[0] or key
 
 
-def _grouped_register_lines(entries: list[tuple[str, str, bool]]) -> list[str]:
-    """`entries` is `(segment, line, headered)` in the order the lines must
-    render in — same-segment entries are always already adjacent, since
-    both callers sort registrations by key and a shared prefix segment
-    keeps consecutive keys together in lexicographic order. Inserts a
-    blank line before every new segment; a `# ----- <segment> -----`
-    header is only emitted when `headered` is true, so callers can pass
-    `headered=False` for `schema/`/`docs/` — they stay singleton and
-    unlabeled, at whatever position their own sort already gave them
-    (ticket #105).
+def _grouped_register_lines(entries: list[tuple[str, str]], *, tail: list[str] | None = None) -> list[str]:
+    """`entries` is `(segment, line)` for every ordinary registration, in
+    the order the lines must render in — same-segment entries are always
+    already adjacent, since both callers sort registrations by key and a
+    shared prefix segment keeps consecutive keys together in lexicographic
+    order. Inserts a blank line before every new segment, under a
+    `# ----- <segment> -----` header.
+
+    `tail` — `docs/`'s then `schema/`'s rendered lines, whichever of the
+    two exist — is appended last as one unlabeled block, one blank line
+    after the last group: schema/docs are cross-resource concerns, not a
+    URL-prefix segment of their own, and `schema/` already has to render
+    after every other registration regardless (`schema_view()` snapshots
+    `self.urls` the moment it's called). Keeping `docs/` right beside it
+    means the pair always renders together rather than wherever its key
+    happened to sort alphabetically (ticket #105).
     """
     lines: list[str] = []
     current_segment: object = object()  # sentinel: always differs from the first entry's segment
-    for segment, line, headered in entries:
+    for segment, line in entries:
         if segment != current_segment:
             if lines:
                 lines.append("")
-            if headered:
-                lines.append(f"# ----- {segment} -----")
+            lines.append(f"# ----- {segment} -----")
             current_segment = segment
         lines.append(line)
+    if tail:
+        if lines:
+            lines.append("")
+        lines.extend(tail)
     return lines
 
 
@@ -745,28 +754,32 @@ def render_registry(plans: list[RegistrationPlan], *, base_name: str, var_name: 
         for module, symbols in sorted(imports.items())
     ]
 
-    entries: list[tuple[str, str, bool]] = []
+    entries: list[tuple[str, str]] = []
+    docs_line: str | None = None
+    schema_line: str | None = None
     for plan in plans:
-        headered = plan.kind not in ("schema", "docs")
         if plan.kind == "viewset":
             line = f"{var_name}.register({plan.key!r}, {plan.symbol}, basename={plan.basename!r})"
         elif plan.kind == "schema":
-            line = (
+            schema_line = (
                 f"{var_name}.register({plan.key!r}, {var_name}.schema_view(prefix={plan.schema_prefix!r}), "
                 f"name={plan.name!r})"
             )
+            continue
         elif plan.kind == "docs":
             docs_view_call = (
                 f"{var_name}.docs_view()"
                 if _is_default_docs_view(plan)
                 else f"{var_name}.docs_view(view_class={plan.symbol})"
             )
-            line = f"{var_name}.register({plan.key!r}, {docs_view_call}, name={plan.name!r})"
+            docs_line = f"{var_name}.register({plan.key!r}, {docs_view_call}, name={plan.name!r})"
+            continue
         else:
             line = f"{var_name}.register({plan.key!r}, {plan.symbol}, name={plan.name!r})"
-        entries.append((_prefix_segment(plan.key), line, headered))
+        entries.append((_prefix_segment(plan.key), line))
 
-    register_lines = _grouped_register_lines(entries)
+    tail = [line for line in (docs_line, schema_line) if line is not None]
+    register_lines = _grouped_register_lines(entries, tail=tail)
 
     lines = [
         '"""Generated once by `apiver init`; hand-editable afterwards, like',

@@ -119,8 +119,9 @@ def test_schema_registration_is_emitted_last(_restore_v3_registry):
 def test_squashed_output_groups_lines_by_url_prefix_segment(_restore_v3_registry):
     """ticket #105: register()/override() lines are grouped by the text
     before the first '/' in their key, each group under its own
-    "# ----- <segment> -----" header; schema/docs stay singleton and
-    unlabeled."""
+    "# ----- <segment> -----" header. schema/docs are unlabeled and pinned
+    together at the end, docs then schema, rather than scattered wherever
+    their own key sorts alphabetically."""
     result = squash_version("v3")
     source = result.registry_path.read_text()
 
@@ -131,6 +132,11 @@ def test_squashed_output_groups_lines_by_url_prefix_segment(_restore_v3_registry
     payments_header = source.index("# ----- payments -----")
     payments_line = source.index("v3.override('payments'")
     assert payments_header < payments_line
+
+    refunds_index = source.index("v3.override('refunds'")
+    docs_index = source.index("v3.override('docs/'")
+    schema_index = source.index("v3.override('schema/'")
+    assert refunds_index < docs_index < schema_index
 
 
 def test_squash_refuses_a_version_with_no_parent():
